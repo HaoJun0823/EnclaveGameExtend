@@ -1,0 +1,234 @@
+﻿// EnclaveCJK v17r 恢复版（= v16.7 逻辑，用户确认"能显示@@中文"的版本）
+//
+// v17r 逻辑（v20.2 失败后回滚，2026-08-08 07:12）：
+//   hook GameWorld 0x20FB2（原 call 0x101005C4 Localize_Str）
+//   判据：[esp+0x48A4] RVA ∈ [0x8D000,0x8F000]
+//   处理：[esp+0x24] = data_head → 置宽 flags|0x8000 + 剥§Z + ASCII→全角
+//   日志：字幕每次 + 非字幕每 500 条（限流）
+//
+// ★ v20.2 结论（07:10）：vtable 替换（Util2D vtable+0xB8 → fake stub）
+//   即使 pushfd/popfd 保护 EFLAGS + 纯汇编零副作用，字幕仍乱码。
+//   → vtable 替换路径彻底不可行（7+2 次尝试全失败）。
+//   → 字幕渲染路径（0x10020F60 / vtable+184 / 拼接/GetKey）不可 hook。
+//   → 字幕中文 = 引擎原样渲染（字库补齐后 UTF-16 天然正确）。
+//   → "前面固定@@ / 尾部@@@@ / 闪烁" = 引擎原样渲染 §Z22 前缀 + 缓冲垃圾。
+
+#define HOOK_RVA    0x20FB2u    // call Localize_Str 调用点
+#define THUNK_RVA   0x1005C4u   // Localize_Str IAT thunk
+#define RET_VA      0x20FB7u    // 原 call 返回点（add esp,10h）
+#define SUB_LO      0x8D000u    // 字幕 Render 区
+#define SUB_HI      0x8F000u
+
+#include <windows.h>
+
+static HMODULE  g_hGameWorld = NULL;
+static DWORD    g_gwBase     = 0;
+static BYTE     g_origBytes[8];
+static DWORD    g_retVA      = 0;
+static DWORD    g_thunkVA    = 0;
+static BOOL     g_hooked     = FALSE;
+static volatile LONG g_hits      = 0;
+static volatile LONG g_subHits   = 0;
+static volatile LONG g_uiHits    = 0;
+
+static void log_msg(const char* fmt, ...)
+{
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    wvsprintfA(buf, fmt, ap);
+    va_end(ap);
+    HANDLE h = CreateFileA("CJK_hook_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    SetFilePointer(h, 0, NULL, FILE_END);
+    DWORD written;
+    WriteFile(h, buf, lstrlenA(buf), &written, NULL);
+    CloseHandle(h);
+}
+
+static void process_subtitle_text(DWORD dataHead)
+{
+    if (!dataHead || dataHead < 0x10000 || dataHead > 0x7FFEFFFF) return;
+    WORD flags = *(WORD*)dataHead;
+    if (!(flags & 0x8000))
+    {
+        *(WORD*)dataHead = flags | 0x8000;
+    }
+    WORD* data = (WORD*)(dataHead + 2);
+    // ★ 剥 § 前缀（v13 宽容逻辑，2026-08-08 07:16 修正——v17r 恢复版漏掉错位形态）：
+    //   WORD0 低字节 == 0xA7 → 有 § 前缀（A7 00 标准 / A7 5A 错位都命中）
+    //   §L 键名（0x00A7, 0x004C）→ 保留（查表用）；其余（§Z 字号等）→ 剥 2 WORD 为空格
+    WORD w0 = data[0];
+    if ((w0 & 0xFF) == 0x00A7)      // 低字节 §?（宽容）
+    {
+        if (w0 == 0x00A7 && data[1] == 0x004C)
+        {
+            // §L 键名 → 保留（不剥）
+        }
+        else
+        {
+            // §Z 字号/其他 → 剥 2 WORD 为空格
+            data[0] = 0x0020;
+            data[1] = 0x0020;
+        }
+    }
+    // ★ 取证日志（v17r-milestone，2026-08-08 07:19）：dump 字幕文本完整现场
+    //   目的：定位尾部 @@@@ —— 终止符后垃圾分布 / 长度计算 / 是否每帧变化
+    {
+        static volatile LONG s_logCnt = 0;
+        LONG n = InterlockedIncrement(&s_logCnt);
+        if (n <= 25 || (n % 100) == 1)
+        {
+            // wcslen：数到第一个 0x0000 终止符
+            int len = 0;
+            while (len < 256 && data[len] != 0) len++;
+            // dump 前 96 WORD（含终止符后垃圾）
+            char buf[1024];
+            char* p = buf;
+            p += wsprintfA(p, "[SUB %ld] dh=%08X flags=%04X wcslen=%d\n", n, dataHead, (unsigned)flags, len);
+            for (int i = 0; i < 96 && i < len + 24; i++)
+            {
+                if (i < len)
+                    p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+                else
+                    p += wsprintfA(p, "[%04X] ", (unsigned)data[i]);
+            }
+            p += wsprintfA(p, "\n");
+            // 尾部 8 WORD 详细（垃圾区）
+            p += wsprintfA(p, "tail: ");
+            for (int i = len; i < len + 8; i++)
+                p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+            p += wsprintfA(p, "\n");
+            HANDLE h = CreateFileA("CJK_sub_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                   NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (h != INVALID_HANDLE_VALUE)
+            {
+                SetFilePointer(h, 0, NULL, FILE_END);
+                DWORD written;
+                WriteFile(h, buf, (DWORD)(p - buf), &written, NULL);
+                CloseHandle(h);
+            }
+        }
+    }
+    // ★ 终止符修复（v17r-终止符修复版，2026-08-08 07:24）——尾部 @@@@ 根治
+    //   根因（CJK_sub_log.txt 取证）：引擎写 1 字节终止符（mov byte ...,0），
+    //   宽 UTF-16 需 2 字节 00 00 → 终止符后残留 0xAA → WORD=0x00AA≠0
+    //   → wcslen 跳过它读垃圾（25/71/88 累积）→ @@@@ + 闪烁 + 整句重复
+    //   修复：扫描"高字节=0 且 低字节>0x7E"的 WORD（残留填充 0xAA/0x80+ 特征，
+    //   正文全角化后无此形态）→ 补全为 0x0000 + 清后续 4 WORD
+    for (int i = 1; i < 250; i++)
+    {
+        WORD w = data[i];
+        if (w == 0x0000) break;                 // 已有完整终止符 → 正常
+        if ((w & 0xFF00) == 0x0000 && (w & 0x00FF) > 0x7E)
+        {
+            // 引擎 1 字节终止 + 残留高字节 → 补全宽终止
+            data[i] = 0x0000;
+            for (int j = i + 1; j < i + 5 && j < 250; j++)
+                data[j] = 0x0000;               // 清残留，防 wcslen 继续读
+            break;
+        }
+    }
+
+
+    for (int i = 0; i < 256; i++)
+    {
+        WORD w = data[i];
+        if (w == 0) break;
+        if (w == 0x00A7)
+        {
+            i++;
+            while (i < 256 && data[i] != 0 && data[i] != 0x20)
+                i++;
+            if (i >= 256) break;
+            continue;
+        }
+        if (w == 0x20)
+            data[i] = 0x3000;
+        else if (w >= 0x21 && w <= 0x7E)
+            data[i] = w + 0xFEE0;
+    }
+    InterlockedIncrement(&g_subHits);
+}
+
+static void __declspec(naked) cjk_trampoline_impl(void)
+{
+    __asm
+    {
+        pushad
+        mov eax, [esp + 0x48A4]
+        sub eax, g_gwBase
+        cmp eax, SUB_LO
+        jb  not_sub
+        cmp eax, SUB_HI
+        ja  not_sub
+        mov edx, [esp + 0x24]
+        push edx
+        call process_subtitle_text
+        add esp, 4
+        jmp done_proc
+not_sub:
+        mov eax, g_uiHits
+        inc eax
+        mov g_uiHits, eax
+done_proc:
+        mov eax, g_hits
+        inc eax
+        mov g_hits, eax
+        popad
+        push g_retVA
+        jmp dword ptr [g_thunkVA]
+    }
+}
+
+static BOOL install_hook(void)
+{
+    if (g_hooked) return TRUE;
+    g_hGameWorld = GetModuleHandleA("GameWorld.dll");
+    if (!g_hGameWorld) return FALSE;
+    g_gwBase = (DWORD)g_hGameWorld;
+    g_retVA = g_gwBase + RET_VA;
+    g_thunkVA = g_gwBase + THUNK_RVA;
+
+    BYTE* target = (BYTE*)(g_gwBase + HOOK_RVA);
+    BYTE* hook   = (BYTE*)cjk_trampoline_impl;
+    if (target[0] != 0xE8)
+    {
+        log_msg("[CJK] 0x%X 非 call (0x%02X)，跳过 hook\n", HOOK_RVA, target[0]);
+        return FALSE;
+    }
+    memcpy(g_origBytes, target, 5);
+    DWORD oldProt;
+    if (!VirtualProtect(target, 5, PAGE_EXECUTE_READWRITE, &oldProt)) return FALSE;
+    target[0] = 0xE9;
+    DWORD rel = (DWORD)hook - ((DWORD)target + 5);
+    memcpy(target + 1, &rel, 4);
+    VirtualProtect(target, 5, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), target, 5);
+    g_hooked = TRUE;
+    log_msg("[CJK] Hook 安装成功：0x%X -> %08X (base=%08X)\n",
+            HOOK_RVA, (DWORD)hook, g_gwBase);
+    return TRUE;
+}
+
+static DWORD WINAPI wait_thread(LPVOID)
+{
+    for (;;)
+    {
+        if (install_hook())
+            return 0;
+        Sleep(100);
+    }
+}
+
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+{
+    if (ul_reason_for_call == DLL_PROCESS_ATTACH)
+    {
+        DisableThreadLibraryCalls(hModule);
+        HANDLE h = CreateThread(NULL, 0, wait_thread, NULL, 0, NULL);
+        if (h) CloseHandle(h);
+    }
+    return TRUE;
+}

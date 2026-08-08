@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Binkw32Proxy/Binkw32Proxy.vcxproj" Id="7e1a38e2-143d-49a1-b39a-b1394cea6e81" />
+  <Project Path="EnclaveCJK/EnclaveCJK.vcxproj" Id="442f3b02-3a7d-4774-8d47-e457319baeb3" />
+</Solution>
