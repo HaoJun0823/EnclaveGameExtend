@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18h"
+#define CJK_VERSION "v18i"
 
 #include "pch.h"
 
@@ -2837,9 +2837,19 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 
     h5_diag(retRva, len, slen, (const BYTE*)data);
+    // ★ v18i：宽扫描接管（WORD 到 0x0000）——低字节 0x00 汉字（一/攀/需/开…）在窄 strlen 被腰斩！
+    //   「你拾起了一支火把」→「你拾起了」：一=U+4E00（LE 字节 00 4E），窄 strlen 在 00 处停。
+    //   宽扫描 > 窄扫描（存在 0x00 截断）→ 用宽长度（不限区间，0x00 汉字对象才触发，低风险；
+    //   窄对象宽扫描越界会 >LEN_MAXB 自动不接管）
+    {
+        int wcnt = 0;
+        while (wcnt < 252 && ((const WORD*)data)[wcnt]) wcnt++;
+        int slen_wide = wcnt * 2;
+        if (slen_wide > slen && slen_wide <= LEN_MAXB)
+            return slen_wide;
+    }
     // v16n：区间外（教程/UI 绘制）只记录不接管 —— 防止误改非字幕文本长度
     if (retRva < SUB_LO || retRva > SUB_HI) return 0;
-    // 只有「查到的长度比 strlen 更长」才值得接管；否则一切照旧，零风险
     return (len > slen && len <= LEN_MAXB) ? len : 0;
 }
 
