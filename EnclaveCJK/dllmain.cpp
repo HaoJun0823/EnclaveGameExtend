@@ -1,5 +1,5 @@
 ﻿// ============================================================================
-//  EnclaveCJK  v16e   (2026-07-22，放弃「保留宽」，改为构造时就地转 GBK)
+//  EnclaveCJK  v16f   (2026-08-08，GBK 路线证伪 → 回到宽数据，改为绕过 strlen)
 // ============================================================================
 //  背景：v18~v20.2 一路激进改渲染路径，全部失败并造成倒退。本版【停止试探】，
 //        回到 v15b 已验证可用的三 hook 架构，只做定点修正。
@@ -8,9 +8,15 @@
 //    [0] 0x20FB2  Localize_Str 调用点 —— 字幕文本入口（实证 sub=28746 条经过）
 //                 判据：[esp+0x48A4] RVA ∈ [0x8D000,0x8F000]
 //                 处理：置宽 flags|0x8000 → 剥 §Z → 残留终止符截断 → ASCII 全角化
-//    [1] 0x54F00  TFStr<252> 构造（hook1）：UTF-16 → GBK 就地转换（v16e）
+//    [1] 0x54F00  TFStr<252> 构造（hook1）：★v16f 起【只观察不改写】——
+//                 识别 UTF-16 中文正文后把宽文本【暂存】到 g_stash（按对象指针索引），
+//                 然后无条件放行原构造。对引擎状态零副作用。
 //                 调用者【区间】过滤 [0x8D000,0x8F000]（v16d 由白名单改来）
-//    [2] 0x8ED1A  拼接长度修正 + 临时缓冲清零（hook3），调用者区间过滤
+//    [2] 0x8ED9A  拼接收尾（hook4，v16f 新增）：拼接 sub_1008ECE0 在此写终止符、
+//                 再 copy-ctor 出目标 TFStr。我们在此【直接重建目标对象】：
+//                 前缀(§Z22，从临时缓冲原样取) + 暂存的完整宽正文 + 00 00 终止，
+//                 从而【完全绕开】0x10054DA0 → 0x100EF96A 的裸 strlen。
+//                 （hook3 0x8ED1A 已在 v16f 移除：长度不再经过引擎计算）
 //
 //  ── 本版修正的三个缺陷 ────────────────────────────────────────────────
 //   (1) hook3 入口崩溃（0xC0000005）
@@ -44,31 +50,40 @@
 //             ② 截断时保留句尾标点本身（lastValid = i）而不是连标点一起丢；
 //             ③ 撤销「句号 → 半角点」替换（基于错误假设，且会破坏中文排版）。
 //
-//  ── v16e 的两项修正 ──────────────────────────────────────────────────
-//   (A) 路线纠偏：「保留宽数据」存在结构性天花板，已实锤
-//       拼接 sub_1008ECE0 末尾 0x1008EDA6 → 0x10054DA0 → 0x100EF96A，
-//       0x100EF96A 只收到一个【指针】，长度靠它自己 strlen 数出来：
-//           100EF986  mov dl,[eax] / inc eax / test dl,dl / jne 100EF986
-//       ⇒ hook1 写得再完整、hook3 修得再准，到这一步都被重新按单字节量长，
-//         攀(U+6500 → 字节 00 65) 第一个 0x00 照样把整句砍断。
-//       ⇒ 改为在【构造这一刻】就 WideCharToMultiByte(CP936) 转 GBK。
-//         GBK 双字节均 ≥0x81，永不含 0x00 → 全链路 strlen 语义自洽；
-//         渲染器本来就是窄字节逐个取 + 字库已补齐 → 天然正常。
+//  ── v16e 的结论（已被实测证伪，保留作为教训）──────────────────────────
+//   v16e 假设「渲染器吃窄字节 + 字库已补齐 ⇒ 喂 GBK 即可」，于是在 hook1 里
+//   WideCharToMultiByte(CP936) 就地转 GBK。实测结果：
+//       ★ 被转成 GBK 的整句【完全不显示】；没被 hook1 命中的短句照旧（句尾 @）。
+//   ⇒ 判据：【渲染器消费的是 UTF-16LE，不是 GBK】。反证链：
+//       v16c 时代 hook1 不生效，正文是原构造 vsnprintf 原样拷贝的【UTF-16LE 字节】
+//       （所以才会在 攀 U+6500 的 0x00 处腰斩），而截断前的「以及他们」显示【完全正确】。
+//       若渲染器按 GBK 解释，UTF-16LE 字节只会显示成另一串乱字，不可能正好是原文。
+//   ⇒ 渲染器取字模型 = 逐字节读，<0x80 当 ASCII，≥0x80 则再取一字节拼成
+//       【小端 WORD = Unicode 码位】。GBK 的 以(D2 D4) 在此被读成 U+D4D2（谚文区）
+//       → 字库无此码位 → 整句不出字。与实测现象完全吻合。
 //
-//   (B) hook3 两个缺陷
-//       ① 寄存器污染（潜伏至今）：旧版 pushad 时 eax 存的是 retRVA，
-//          非修正路径 popad 后 mov edi,eax 把长度污染成 0x8DDxx（≈58 万）
-//          → 拼接按 247 字节整段拷贝，把正文缓冲尾部残留拖进字幕。
-//          修正：先 pushad（此时 eax=原始长度）再算 retRVA。
-//       ② 拼接临时缓冲 [esp+0x14] 未初始化，而 0x1008ED9A 只写 1 字节终止符
-//          → 尾部露出栈垃圾。修正：在 hook3 内预先清零该 252 字节。
+//  ── v16f 的路线（当前）────────────────────────────────────────────────
+//   既然渲染器要 UTF-16LE，就必须让宽数据活到最后；而宽数据的唯一杀手是
+//   拼接收尾 0x1008EDA6 → 0x10054DA0 → 0x100EF96A 的【裸 strlen】
+//   （只收一个指针，长度自己数）。既然改不了它，就【别走它】：
 //
-//  ★ 不要重走的死路（累计 9 次失败）：
-//     vtable 替换 / 渲染路径 hook（0x10020F60、vtable+0xB8、拼接调用、GetKey、
-//     终止符写入 0x8ED9A）—— 全部导致乱码或崩溃。
-//     ★ 以及「让 UTF-16 宽数据活着走到渲染器」——被 0x100EF96A 的 strlen 判死刑。
+//     hook1(0x54F00)  只识别 + 暂存宽正文，不改写任何引擎对象（零副作用）。
+//     hook4(0x8ED9A)  在拼接函数写终止符那一刻接管：此时
+//                       esi = 目标 TFStr、ebx = 前缀字节数、[esp+0x14] = 临时缓冲、
+//                       [ebp+0xc] = 正文对象（用它去 g_stash 里取回完整宽文本）。
+//                     直接把「前缀 + 宽正文 + 00 00」写进目标对象并设 vtable，
+//                     然后跳过 0x8EDA6 的 copy-ctor 调用 → strlen 根本不会执行。
+//     hook3(0x8ED1A)  移除。长度不再由引擎计算，修它已无意义（少一处汇编风险）。
+//
+//   为什么这次能同时解决句尾 @：目标缓冲的终止符由我们写【2 字节 00 00】，
+//   落在偶数边界上，渲染器按 WORD 取字时天然停住，尾部不会再读到残留。
+//
+//  ★ 不要重走的死路（累计 10 次失败）：
+//     vtable 替换 / 渲染路径 hook（0x10020F60、vtable+0xB8、拼接调用、GetKey）
+//     —— 全部导致乱码或崩溃。
+//     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16e"
+#define CJK_VERSION "v16f"
 
 #include "pch.h"
 
@@ -456,19 +471,18 @@ static BOOL g_hookedTfstr = FALSE;
 static BOOL g_hookedTfstrLen = FALSE;
 
 // ────────────────────────────────────────────────────────────────────────
-// ★ v16d 诊断：记录字幕区 TFStr 构造调用（前 60 条）→ CJK_tfstr_log.txt
-//   目的：一次运行即可拿到真实 retRVA + 文本首字，供后续精确定位调用点。
+// ★ v16f 诊断：写 CJK_tfstr_log.txt
+//   v16e 的教训：日志按「总条数」封顶，结果 0x8E362（常量 "SN..." 的构造，
+//   每帧都调）在字幕出现之前就把 80 条配额吃光，真正想看的一条都没记上。
+//   现在改为【按调用点分配额】：
+//     · 未命中的调用点每个最多 3 条（够看清它是什么就行）
+//     · 命中（识别为中文正文）的一律记录
+//     · 全局总量 160 条封顶
 // ────────────────────────────────────────────────────────────────────────
-static void tfstr_diag(DWORD retRva, const WORD* w, int n, int strong, int hit, int gbk)
+static void diag_write(const char* buf)
 {
-    static volatile LONG s_c = 0;
-    LONG k = InterlockedIncrement(&s_c);
-    if (k > 80) return;
-    char buf[192];
-    wsprintfA(buf, "[TFSTR] ret=%05X n=%d strong=%d %s gbk=%d | %04X %04X %04X %04X %04X %04X\r\n",
-              retRva, n, strong, hit ? "GBK " : "orig", gbk,
-              n > 0 ? w[0] : 0, n > 1 ? w[1] : 0, n > 2 ? w[2] : 0,
-              n > 3 ? w[3] : 0, n > 4 ? w[4] : 0, n > 5 ? w[5] : 0);
+    static volatile LONG s_total = 0;
+    if (InterlockedIncrement(&s_total) > 160) return;
     HANDLE h = CreateFileA("CJK_tfstr_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
                            NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return;
@@ -476,6 +490,162 @@ static void tfstr_diag(DWORD retRva, const WORD* w, int n, int strong, int hit, 
     DWORD written;
     WriteFile(h, buf, lstrlenA(buf), &written, NULL);
     CloseHandle(h);
+}
+
+#define DIAG_SITES      16
+#define DIAG_PER_SITE   3
+
+static void tfstr_diag(DWORD retRva, const WORD* w, int n, int strong, int hit)
+{
+    static DWORD s_site[DIAG_SITES];
+    static LONG  s_cnt[DIAG_SITES];
+    static int   s_sites = 0;
+    int i, idx = -1;
+    char buf[224];
+
+    for (i = 0; i < s_sites; i++)
+        if (s_site[i] == retRva) { idx = i; break; }
+    if (idx < 0 && s_sites < DIAG_SITES)
+    {
+        idx = s_sites++;
+        s_site[idx] = retRva;
+        s_cnt[idx]  = 0;
+    }
+    if (idx >= 0)
+    {
+        s_cnt[idx]++;
+        // 未命中的调用点：只留前 3 条，其余静默（否则会把配额刷爆）
+        if (!hit && s_cnt[idx] > DIAG_PER_SITE) return;
+    }
+
+    wsprintfA(buf, "[TFSTR] ret=%05X n=%3d strong=%2d %s cnt=%d | %04X %04X %04X %04X %04X %04X\r\n",
+              retRva, n, strong, hit ? "STASH" : "pass ", idx >= 0 ? s_cnt[idx] : 0,
+              n > 0 ? w[0] : 0, n > 1 ? w[1] : 0, n > 2 ? w[2] : 0,
+              n > 3 ? w[3] : 0, n > 4 ? w[4] : 0, n > 5 ? w[5] : 0);
+    diag_write(buf);
+}
+
+// 拼接收尾诊断：把最终写进目标对象的内容前若干字节原样 dump 出来
+static void concat_diag(const char* tag, int prefixLen, int nWords, int total,
+                        const BYTE* prefix, const WORD* w)
+{
+    static volatile LONG s_c = 0;
+    char buf[256];
+    if (InterlockedIncrement(&s_c) > 40) return;
+    wsprintfA(buf, "[CONCAT] %s pfx=%d(%02X %02X %02X %02X) n=%d total=%d | %04X %04X %04X %04X\r\n",
+              tag, prefixLen,
+              prefixLen > 0 ? prefix[0] : 0, prefixLen > 1 ? prefix[1] : 0,
+              prefixLen > 2 ? prefix[2] : 0, prefixLen > 3 ? prefix[3] : 0,
+              nWords, total,
+              nWords > 0 && w ? w[0] : 0, nWords > 1 && w ? w[1] : 0,
+              nWords > 2 && w ? w[2] : 0, nWords > 3 && w ? w[3] : 0);
+    diag_write(buf);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// ★ v16f 宽文本暂存表
+//   hook1 在字幕区识别出「UTF-16 中文正文」后，把整段宽文本按【目标对象指针】
+//   存进来；hook4 在拼接收尾时用 [ebp+0xc]（正文对象）反查取回。
+//   为什么要暂存而不是直接改对象：TFStr<252> 的数据要经过 vsnprintf/strlen 两道
+//   单字节关卡，宽数据放在对象里必被腰斩；放在我们自己的表里则毫发无损。
+// ────────────────────────────────────────────────────────────────────────
+#define STASH_SLOTS   8
+#define STASH_MAXW    125           // 252 字节 / 2
+
+typedef struct
+{
+    void* obj;
+    int   n;                        // WORD 数（0 = 该槽无效）
+    WORD  w[STASH_MAXW];
+} CjkStash;
+
+static CjkStash g_stash[STASH_SLOTS];
+static int      g_stashNext = 0;
+
+static CjkStash* stash_find(void* obj)
+{
+    int i;
+    if (!obj) return NULL;
+    for (i = 0; i < STASH_SLOTS; i++)
+        if (g_stash[i].obj == obj && g_stash[i].n > 0) return &g_stash[i];
+    return NULL;
+}
+
+// n <= 0 表示「该对象这次构造的不是中文正文」→ 只作废旧记录，不写入。
+// 这一步很关键：同一个栈对象会被反复复用，不作废就会拿旧内容顶替新内容。
+static void stash_put(void* obj, const WORD* w, int n)
+{
+    int i, k = -1;
+    if (!obj) return;
+    for (i = 0; i < STASH_SLOTS; i++)
+        if (g_stash[i].obj == obj) { k = i; break; }
+    if (k < 0)
+    {
+        k = g_stashNext;
+        g_stashNext = (g_stashNext + 1) % STASH_SLOTS;
+    }
+    g_stash[k].obj = NULL;          // 先失效，拷完再挂上
+    g_stash[k].n   = 0;
+    if (n <= 0 || n > STASH_MAXW) return;
+    for (i = 0; i < n; i++) g_stash[k].w[i] = w[i];
+    g_stash[k].n   = n;
+    g_stash[k].obj = obj;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// ★ v16f 核心数据结构：字节长度登记表
+//
+//   整个 bug 只有一个成因 —— 引擎在 4 个地方用【单字节 strlen】重新量长度，
+//   而 UTF-16 正文里低字节为 0x00 的汉字（攀 6500 / 一 4E00 / 需 9700 …554 处）
+//   会让 strlen 提前收工，把句子拦腰砍断。
+//
+//   注意：缓冲里是【窄前缀 §Z22 + 宽正文】的混合物，所以「wcslen×2」在收尾
+//   阶段是错的。正确长度只有引擎自己知道（拼接时算在 eax 里）。
+//   ⇒ 谁知道就谁登记：hook1 登记自建正文长度、hook4 登记拼接总长度，
+//     后面的 strlen 点直接按【对象指针】查表取回，查不到就老老实实走原逻辑。
+//
+//   这样做的好处：不改变任何数据格式（v16c 已证明引擎原生就能正确渲染
+//   「窄前缀 + UTF-16 正文」），只把被 strlen 弄错的长度纠正回来。
+// ────────────────────────────────────────────────────────────────────────
+#define LEN_SLOTS   12
+#define LEN_MAXB    249         // 252 内联缓冲 - 2 字节宽终止 - 1 字节余量
+
+typedef struct
+{
+    void* obj;
+    int   len;                  // 字节数（0 = 该槽无效）
+} CjkLen;
+
+static CjkLen g_len[LEN_SLOTS];
+static int    g_lenNext = 0;
+
+static int len_find(void* obj)
+{
+    int i;
+    if (!obj) return 0;
+    for (i = 0; i < LEN_SLOTS; i++)
+        if (g_len[i].obj == obj && g_len[i].len > 0) return g_len[i].len;
+    return 0;
+}
+
+// len <= 0 → 只作废旧记录。栈上的 TFStr 地址会被反复复用，不作废就会
+// 拿上一句的长度去量这一句 —— 那正是句尾冒出 @ 的经典成因。
+static void len_put(void* obj, int len)
+{
+    int i, k = -1;
+    if (!obj) return;
+    for (i = 0; i < LEN_SLOTS; i++)
+        if (g_len[i].obj == obj) { k = i; break; }
+    if (k < 0)
+    {
+        k = g_lenNext;
+        g_lenNext = (g_lenNext + 1) % LEN_SLOTS;
+    }
+    g_len[k].obj = NULL;
+    g_len[k].len = 0;
+    if (len <= 0 || len > LEN_MAXB) return;
+    g_len[k].len = len;
+    g_len[k].obj = obj;
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -492,28 +662,36 @@ static void tfstr_diag(DWORD retRva, const WORD* w, int n, int strong, int hit, 
 //   【窄格式串】，UTF-16 里低字节为 0x00 的汉字（攀 U+6500 → 字节 00 65、一 4E00、
 //   需 9700 …共 554 处）在此处终止 → "以及他们攀上…" 只剩 "以及他们"。
 //
-//   ★★ v16e 路线修正（反汇编实锤，2026-07-22）★★
-//   v14~v16d 一直想「把 UTF-16 宽数据原样保留下去」，但这条路存在【结构性天花板】：
-//     拼接 sub_1008ECE0 的最后一步 0x1008EDA6 → 0x10054DA0 → 0x100EF96A，
-//     0x100EF96A 的核心是一段【裸 strlen】：
-//         100EF986  mov dl,[eax] / inc eax / test dl,dl / jne  → len = eax-edi
-//         100EF994  call [edx+0x68]            ; Assign(ptr, len)
-//     它只收到一个【指针】（push eax），长度是它自己数出来的。
-//     ⇒ 无论 hook1 把宽数据写得多完整、hook3 把长度修得多准，到这一步都会被
-//       重新按单字节量长，攀(字节 00 65) 的第一个 0x00 照样把整句砍断。
+//   ★★★ v16f 路线定案（v16e 实测 + 反汇编交叉验证，2026-08-08 夜）★★★
 //
-//   ⇒ 正确做法：不保留宽，而是在【构造这一刻】就把 UTF-16 转成 GBK 窄字节。
-//     理由：渲染器本来就是窄字节逐个取（0x8DE0F movsx byte ptr [eax+14h]），
-//           且字库已补齐 —— 只要喂进合法 GBK，中文天然正常显示。
-//     转换后：GBK 双字节均 ≥0x81，永不含 0x00 → strlen / GetLength / 1 字节终止符
-//           全链路自洽，hook3 的长度修正也不会再被触发。
+//   v16e 曾把正文就地转成 GBK，理由是「渲染器是窄字节逐个取」。实测【整句消失】。
+//   连同 v16c 的表现一起看，两条实证把结论钉死了：
+//     · v16c：hook1 因 off-by-5 从未命中 ⇒ 对象里是引擎原生的 UTF-16（被 vsnprintf
+//             截断过），屏幕上「以及他们」【显示完全正常】。
+//     · v16e：写进合法 GBK ⇒ 屏幕上【一个字都没有】。
+//   ⇒ 渲染器消费的是 UTF-16LE，不是 GBK。GBK 路线判死刑。
+//   ⇒ 更重要的推论：引擎【原生就能正确渲染】「窄前缀 §Z22 + UTF-16 正文」的混合
+//     缓冲。我们要做的根本不是改数据格式，而是【只把被 strlen 弄错的长度纠正回来】。
+//
+//   全链路 4 个单字节 strlen 点（已逐个反汇编确认）：
+//     ① 0x10054F00  构造 vsnprintf(buf,0xFC,【文本当格式串】,va)   ← 本函数接管
+//     ② 0x1008ED18  拼接取正文 GetLength                          ← hook3
+//     ③ 0x1008EDA6 → 0x10054DA0 → 0x100EF96A  copy-ctor 裸 strlen  ← hook4
+//     ④ 0x100F9B59  绘制前拷贝 0x100F9AFA 内的 strlen              ← hook5
+//   拷贝动作本身全是 rep movsd，对 UTF-16 完全安全 —— 唯一的敌人就是 strlen。
+//
+//   本函数（①）做的事：识别出「UTF-16 中文正文」后，按 WORD 原样搬进内联缓冲，
+//   补 2 字节宽终止，设回 TFStr<252> 的 vtable，并把真实字节长度登记进 g_len。
+//   这与引擎原生构造【语义等价】（TFStr<252> 的全部状态就是 vtable + 内联缓冲，
+//   没有长度字段），区别仅在于我们不会在 0x00 处停手。
 //
 //   返回 1 = 已完成构造（trampoline 直接 ret）；0 = 放行原逻辑。
 // ────────────────────────────────────────────────────────────────────────
-static int __cdecl tfstr_cjk_build(void* obj, const void* text, DWORD retRva)
+static int __cdecl tfstr_cjk_wide(void* obj, const void* text, DWORD retRva)
 {
     const WORD* w = (const WORD*)text;
-    int n = 0, strong = 0, pct = 0, hit = 0, gbk = 0;
+    int n = 0, strong = 0, pct = 0, hit = 0, i;
+
     if (!obj || !text) return 0;
 
     __try
@@ -521,7 +699,12 @@ static int __cdecl tfstr_cjk_build(void* obj, const void* text, DWORD retRva)
         // 1) 以「合法字幕正文字符」为边界求长度。
         //    ★ 刻意不以 0x0000 为界：万一判据误判窄串，也不会顺着堆内存一路扫到
         //      下一个 00 00，从而杜绝把堆垃圾拖进正文（句尾 @ 的经典成因）。
-        while (n < TFSTR_MAX_WORDS && is_body_char(w[n]))
+        //    上限 123 个 WORD（TFSTR_MAX_WORDS-2）：246 正文 + 4 前缀(§Z22) + 1 终止
+        //    = 251 ≤ 252，永远触不到拼接函数的 clamp。
+        //    ★ 为什么不是 124：拼接在 0x1008ED26 算 maxBody = 252 - 前缀 - 1 = 247（奇数），
+        //      若正文 248 字节会被裁到 247 —— 正好把最后一个 UTF-16 码元切成半个，
+        //      屏幕上就是一个无字形的垃圾字（句尾 @）。留 123 从根上避开。
+        while (n < TFSTR_MAX_WORDS - 2 && is_body_char(w[n]))
         {
             WORD c = w[n];
             if (c == 0x0025) pct++;      // '%'：这是变参格式串，绝不接管
@@ -537,36 +720,33 @@ static int __cdecl tfstr_cjk_build(void* obj, const void* text, DWORD retRva)
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 
     // 2) 严格判据（宁可放行也不误判）：
-    //    n >= 4      → 挡掉引擎窄格式串 "§Z%i"/"§Z22"（只有 2 个 WORD，
-    //                  其字节 A7 5A 25 69 误读成 WORD 后同样落在 CJK 区间）
+    //    n >= 4      → 挡掉引擎窄格式串 "§Z%i"/"§Z22"（只有 2 个 WORD，其字节
+    //                  A7 5A 25 69 误读成 WORD 后同样落在 CJK 区间），也挡掉
+    //                  v16e 日志里刷屏 80 条的 "SN"（窄字节误读成 WORD 0x4E53）
     //    strong >= 2 → 至少两个「低字节不可打印的汉字」，纯 ASCII 窄串永远不满足
     //    pct == 0    → 含 '%' 的一律放行，保住 vsnprintf 的变参替换语义
     hit = (n >= 4 && strong >= 2 && pct == 0);
 
     if (hit)
     {
-        // 3) UTF-16 → GBK(CP936) 就地写入内联缓冲 obj+4
-        //    失败（码位不可映射 / 缓冲不足）→ 返回 0 放行原逻辑；
-        //    此时缓冲可能被写脏也无妨——原函数会完整重建该对象。
-        char* dst = (char*)obj + 4;
         __try
         {
-            gbk = WideCharToMultiByte(936, 0, (LPCWSTR)w, n, dst, TFSTR_GBK_MAX, NULL, NULL);
+            WORD* dst = (WORD*)((BYTE*)obj + 4);        // 数据【内联】在 +4
+            for (i = 0; i < n; i++) dst[i] = w[i];      // 按 WORD 搬，0x00 不再是边界
+            dst[n] = 0;                                 // 宽终止 00 00
+            *(DWORD*)obj = g_gwBase + TFSTR_VTABLE_RVA; // TFStr<252> vtable
+            len_put(obj, n * 2);                        // ★ 登记真实字节长度
         }
-        __except (EXCEPTION_EXECUTE_HANDLER) { gbk = 0; }
-
-        if (gbk <= 0 || gbk > TFSTR_GBK_MAX)
-        {
-            hit = 0;
-        }
-        else
-        {
-            dst[gbk] = 0;                                   // 窄终止符，1 字节即正确
-            *(DWORD*)obj = g_gwBase + TFSTR_VTABLE_RVA;     // TFStr<252> vtable
-        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { hit = 0; }
+    }
+    else
+    {
+        // 没接管 ⇒ 作废该地址的旧登记。栈对象地址会复用，留着就会用上一句的
+        // 长度去量这一句，尾部必然拖出垃圾。
+        len_put(obj, 0);
     }
 
-    tfstr_diag(retRva, w, n, strong, hit, gbk);
+    tfstr_diag(retRva, w, n, strong, hit);
     return hit;
 }
 
@@ -600,11 +780,11 @@ static void __declspec(naked) cjk_tfstr_trampoline_impl(void)
         test ecx, ecx
         jz  tfstr_fallback
         mov edx, [esp + 4]           ; 目标对象（arg1 / this）
-        ; tfstr_cjk_build(obj, text, retRva)  —— 判据 + GBK 转换 + 诊断全在 C 侧
+        ; tfstr_cjk_wide(obj, text, retRva) —— 判据 + 宽拷贝 + 长度登记 + 诊断全在 C 侧
         push eax
         push ecx
         push edx
-        call tfstr_cjk_build
+        call tfstr_cjk_wide
         add esp, 12
         test eax, eax
         jz  tfstr_fallback           ; 0 → 放行原逻辑（此时 EBX/ESI/EDI/EBP 仍为原值）
@@ -675,6 +855,13 @@ static void __declspec(naked) cjk_tfstrlen_trampoline_impl(void)
 static BYTE g_origConcatLen[5];
 static BOOL g_hookedConcatLen = FALSE;
 
+// hook3 用：按正文对象指针取回 hook1 登记的真实字节数（取不到返回 0 = 放行）
+static int __cdecl cjk_text_len(void* textObj)
+{
+    if (!textObj) return 0;
+    return len_find(textObj);
+}
+
 static void __declspec(naked) cjk_concat_len_trampoline_impl(void)
 {
     __asm
@@ -714,32 +901,16 @@ static void __declspec(naked) cjk_concat_len_trampoline_impl(void)
         mov ecx, CONCAT_BUF_DWORDS
         rep stosd
 
-        ; UTF-16 正文 → 重算字节数（wcslen × 2）
-        ; 注：v16e 起 hook1 已在构造时转成 GBK，此分支通常不再触发，保留作兜底。
-        mov eax, [ebp + 0xc]            ; 正文对象
-        ; ★ NULL/野指针守卫必须在 lea 之【前】。
-        ;   若写成 lea 后再 test，NULL 会变成 4 而通过检查，随后读 [4+1] → 0xC0000005。
-        cmp eax, 0x10000                ; 低 64K 为不可访问保留区
-        jb  tcl_pop
-        lea eax, [eax + 4]              ; TFStr<252> 数据【内联】在 +4，不是指针！
-        ; UTF-16 检测：字节[1]==0（ASCII UTF-16）或 字节[1]∈[0x4E,0xA0)（CJK UTF-16）
-        movzx ecx, byte ptr [eax + 1]
-        test ecx, ecx
-        jz  tcl_utf16
-        cmp ecx, 0x4E
-        jb  tcl_pop                     ; <0x4E → 窄
-        cmp ecx, 0xA0
-        jae tcl_pop                     ; >=0xA0 → 窄（UTF-8/GBK 首字节/续字节）
-    tcl_utf16:
-        xor ecx, ecx
-    tcl_loop:
-        cmp word ptr [eax + ecx*2], 0
-        je  tcl_utf16_done
-        inc ecx
-        cmp ecx, TFSTR_MAX_WORDS
-        jl  tcl_loop
-    tcl_utf16_done:
-        lea eax, [ecx*2]                ; 字节数 = 字符 × 2
+        ; ★ v16f：改为【查登记表】取真实长度，不再靠字节特征去猜。
+        ;   旧的「字节[1] ∈ [0x4E,0xA0)」判据有真实漏洞：以全角引号开头的句子
+        ;   （“ = U+201C → 字节 1C 20，字节[1]=0x20）会被误判成窄串而漏修。
+        ;   现在 hook1 接管构造时就把准确字节数登记进 g_len，这里按对象指针取回，
+        ;   命中才改，取不到就完全放行 —— 判据与 hook1 天然一致，不存在错配。
+        push dword ptr [ebp + 0xc]      ; 正文对象
+        call cjk_text_len
+        add esp, 4
+        test eax, eax
+        jz  tcl_pop
         mov [esp + 0x1C], eax           ; 写回 pushad 的 eax 槽
     tcl_pop:
         popad                           ; eax = 原始长度 或 修正长度
@@ -747,6 +918,222 @@ static void __declspec(naked) cjk_concat_len_trampoline_impl(void)
         mov eax, g_gwBase
         add eax, CONCATLEN_RET_RVA      ; 跳回 0x1008ED1F
         jmp eax
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ★ hook 4：0x1008ED9A（拼接收尾）—— 绕过 copy-ctor 的裸 strlen
+//
+//   反汇编现场（sub_1008ECE0 尾部）：
+//     1008ED95  mov esi,[ebp+8]           ; esi = 目标 TFStr
+//     1008ED98  add eax,ebx               ; ★ eax = 前缀 + 正文 = 真实总字节数
+//     1008ED9A  mov byte [esp+eax+0x14],0 ; ← patch 这 5 字节（C6 44 04 14 00）
+//     1008ED9F  lea eax,[esp+0x10]
+//     1008EDA3  push eax
+//     1008EDA4  mov ecx,esi
+//     1008EDA6  call 0x10054DA0           ; copy-ctor → 0x100EF96A 裸 strlen（杀手）
+//     1008EDAB  mov ecx,[esp+0x114]       ; ← 我们直接跳到这里，跳过 copy-ctor
+//     1008EDB3  mov eax,esi               ; 收尾自己设返回值，无需我们操心
+//
+//   关键点：0x1008ED98 那一刻，【引擎自己已经把正确的总字节数算在 eax 里】。
+//   copy-ctor 之所以会截断，纯粹是因为它把这个现成的长度丢掉，改用 strlen 重数。
+//   所以 hook4 什么都不用猜 —— 拿 eax 直接做等价的 Assign，然后跳过 copy-ctor。
+//
+//   对窄串同样正确（窄串的 total 本来就等于 strlen 结果），所以无需区分宽窄，
+//   区间过滤内可以无条件接管。顺带根除「strlen 冲过终止符吃到栈垃圾」的句尾 @。
+// ════════════════════════════════════════════════════════════════════════
+#define HOOK_CONCATFIN_RVA   0x8ED9Au
+#define CONCATFIN_ORIG_RVA   0x8ED9Fu   // 放行：重放原指令后回到这里
+#define CONCATFIN_SKIP_RVA   0x8EDABu   // 接管：跳过 copy-ctor 直达收尾
+static BYTE g_origConcatFin[5];
+static BOOL g_hookedConcatFin = FALSE;
+
+static void h4_diag(void* dst, const BYTE* p, int total)
+{
+    static volatile LONG s_c = 0;
+    char buf[256];
+    if (InterlockedIncrement(&s_c) > 24) return;
+    wsprintfA(buf, "[H4] dst=%08X total=%3d | %02X %02X %02X %02X %02X %02X %02X %02X | tail %02X %02X %02X %02X\r\n",
+              (DWORD)dst, total,
+              p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
+              total >= 4 ? p[total - 4] : 0, total >= 3 ? p[total - 3] : 0,
+              total >= 2 ? p[total - 2] : 0, total >= 1 ? p[total - 1] : 0);
+    diag_write(buf);
+}
+
+// 返回 1 = 已完成写入（trampoline 跳过 copy-ctor）；0 = 放行原逻辑
+static int __cdecl cjk_concat_finish(void* dst, const BYTE* tmp, int total)
+{
+    BYTE* d;
+    int i;
+
+    if (!dst || !tmp) return 0;
+    if (total <= 0 || total > LEN_MAXB) return 0;   // 越界一律放行，绝不冒险
+
+    __try
+    {
+        d = (BYTE*)dst + 4;                          // TFStr<252> 数据内联在 +4
+        for (i = 0; i < total; i++) d[i] = tmp[i];
+        d[total]     = 0;                            // 宽终止 00 00
+        d[total + 1] = 0;                            // （窄读也只见 1 个 0，无害）
+        *(DWORD*)dst = g_gwBase + TFSTR_VTABLE_RVA;
+        len_put(dst, total);                         // ★ 登记给 hook5 用
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+    h4_diag(dst, tmp, total);
+    return 1;
+}
+
+static void __declspec(naked) cjk_concat_fin_trampoline_impl(void)
+{
+    __asm
+    {
+        ; 进入时（jmp 而来，未压任何东西）：
+        ;   eax = 总字节数（前缀+正文），ebx = 前缀字节数，ebp = 拼接函数栈帧
+        ;   临时缓冲数据区 = esp+0x14；目标对象 = [ebp+8]
+        pushad                          ; esp -= 0x20 ⇒ 临时数据区 = esp+0x34
+
+        ; 调用者过滤：sub_1008ECE0 有 7 个调用者，只有字幕区 [0x8D000,0x8F000]
+        ; 才接管；资源名/字符串处理一律原样放行。
+        mov ecx, [ebp + 4]              ; 拼接函数调用者的返回地址
+        sub ecx, g_gwBase
+        cmp ecx, SUB_LO
+        jb  h4_orig
+        cmp ecx, SUB_HI
+        ja  h4_orig
+
+        ; cjk_concat_finish(dst, tmp, total)  —— cdecl，参数从右往左压
+        lea ecx, [esp + 0x34]           ; ★ 先算地址，再压栈（顺序不能反）
+        push eax                        ; total
+        push ecx                        ; tmp
+        push dword ptr [ebp + 8]        ; dst
+        call cjk_concat_finish
+        add esp, 12
+        test eax, eax
+        jz  h4_orig
+
+        popad
+        mov edx, g_gwBase
+        add edx, CONCATFIN_SKIP_RVA     ; 跳过 copy-ctor（edx 在收尾段未被使用）
+        jmp edx
+
+    h4_orig:
+        popad
+        mov byte ptr [esp + eax + 0x14], 0   ; 重放被 patch 的原指令
+        mov edx, g_gwBase
+        add edx, CONCATFIN_ORIG_RVA          ; 0x1008ED9F 处 eax/edx 都会被重设
+        jmp edx
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ★ hook 5：0x100F9B59（绘制前拷贝 0x100F9AFA 内的 strlen）—— 最后一道关卡
+//
+//   反汇编现场：
+//     100F9B3A  call [eax+0x4c]      ; 源 IsNarrow?  TFStr<252> 恒返回 1 ⇒ 必走窄
+//     100F9B45  call [edx+0x28]      ; 源 GetData → eax
+//     100F9B59  mov ecx,eax          ; ← patch 这 5 字节（8B C8 8D 71 01）
+//     100F9B5B  lea esi,[ecx+1]
+//     100F9B5E  mov dl,[ecx]/inc ecx/test dl,dl/jne   ; ★裸 strlen
+//     100F9B67  mov edx,[edi] / sub ecx,esi
+//     100F9B6B  push ecx / push eax / mov ecx,edi / call [edx+0x68]  ; 目标 Assign
+//     100F9BA4  收尾（mov eax,edi）
+//
+//   注：这个函数其实有一条完整的【宽分支】（0x100F9B90 按 WORD 做 wcslen +
+//   call [edx+0x88] AssignWide），但 TFStr<252> 的 vtable 把 +0x4C/+0x50 硬编码成
+//   1/0（"我是窄类型"），所以永远走不到。曾考虑伪造 vtable 把它掰到宽分支，
+//   但缓冲里是【窄前缀 §Z22 + 宽正文】的混合物，整块按 UTF-16 解释会让
+//   0x1008DD8B 的 cmp byte [eax],0xA7 之后的字号解析错乱 —— 风险远大于收益。
+//   ⇒ 仍走窄分支，只是把长度从 g_len 查回来，其余一切保持引擎原生。
+// ════════════════════════════════════════════════════════════════════════
+#define HOOK_DRAWLEN_RVA     0xF9B59u
+#define DRAWLEN_ORIG_RVA     0xF9B5Eu   // 放行：重放 2 条原指令后回到这里
+#define DRAWLEN_DONE_RVA     0xF9BA4u   // 接管：自己 Assign 完直达收尾
+static BYTE g_origDrawLen[5];
+static BOOL g_hookedDrawLen = FALSE;
+
+// head[] = 绘制现场缓冲的头 10 字节。这是判定「是否还存在第 5 个截断点」的关键证据：
+//   期望看到 A7 5A 32 32 开头（窄前缀 §Z22），紧跟正文的 UTF-16 码元。
+static void h5_diag(DWORD retRva, int found, int slen, const BYTE* head)
+{
+    static volatile LONG s_c = 0;
+    char buf[224];
+    if (InterlockedIncrement(&s_c) > 24) return;
+    wsprintfA(buf, "[H5] ret=%05X len=%3d strlen=%3d %-7s | %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+              retRva, found, slen,
+              found > 0 ? (found > slen ? "RESCUED" : "same") : "miss",
+              head[0], head[1], head[2], head[3], head[4],
+              head[5], head[6], head[7], head[8], head[9]);
+    diag_write(buf);
+}
+
+// 返回 >0 = 用这个字节数；0 = 放行原 strlen
+static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
+{
+    void* obj;
+    int len = 0, slen = 0, i;
+    BYTE head[10];
+
+    if (!data) return 0;
+    for (i = 0; i < 10; i++) head[i] = 0;
+    __try
+    {
+        // 0x100F9AFA 拿到的是 GetData 的结果（obj+4），回退 4 字节即对象指针
+        obj = (void*)((BYTE*)data - 4);
+        len = len_find(obj);
+        while (slen < 252 && ((const BYTE*)data)[slen]) slen++;
+        for (i = 0; i < 10; i++) head[i] = ((const BYTE*)data)[i];
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+    h5_diag(retRva, len, slen, head);
+    // 只有「查到的长度比 strlen 更长」才值得接管；否则一切照旧，零风险
+    return (len > slen && len <= LEN_MAXB) ? len : 0;
+}
+
+static void __declspec(naked) cjk_draw_len_trampoline_impl(void)
+{
+    __asm
+    {
+        ; 进入时：eax = 数据指针，edi = 目标 CStr
+        ;   0x100F9AFA 入口后压了 6 个 dword（-1/handler/fs/ecx/esi/edi）
+        ;   ⇒ 此处返回地址 = [esp+0x18]；pushad 后 = [esp+0x38]
+        pushad
+
+        mov ecx, [esp + 0x38]
+        sub ecx, g_gwBase
+        cmp ecx, SUB_LO
+        jb  h5_orig
+        cmp ecx, SUB_HI
+        ja  h5_orig
+
+        push ecx                        ; retRva
+        push eax                        ; data
+        call cjk_draw_len
+        add esp, 8
+        test eax, eax
+        jz  h5_orig
+
+        mov [esp + 0x18], eax           ; 长度写回 pushad 的 ECX 槽
+        popad                           ; ⇒ ecx = 长度，eax = 数据指针（原样）
+
+        mov edx, [edi]                  ; 目标 CStr 的 vtable
+        push ecx                        ; len
+        push eax                        ; ptr
+        mov ecx, edi
+        call dword ptr [edx + 0x68]     ; CStr::Assign(ptr, len)（被调用者清栈）
+        mov eax, g_gwBase
+        add eax, DRAWLEN_DONE_RVA       ; 0x100F9BA4 处 eax 会被 mov eax,edi 重设
+        jmp eax
+
+    h5_orig:
+        popad
+        mov ecx, eax                    ; 重放原指令 ①
+        lea esi, [ecx + 1]              ; 重放原指令 ②
+        mov edx, g_gwBase
+        add edx, DRAWLEN_ORIG_RVA       ; 原 strlen 只用 dl，随后 mov edx,[edi] 重设
+        jmp edx
     }
 }
 
@@ -807,9 +1194,65 @@ static BOOL install_hook(void)
         log_msg("[CJK] v15b 拼接长度修正 hook: 0x%X -> %08X\n", HOOK_CONCATLEN_RVA, (DWORD)cjk_concat_len_trampoline_impl);
     }
 
+    // ── v16f hook 4：0x1008ED9A（拼接收尾，绕过 copy-ctor 裸 strlen）──
+    //    ★ 上线前逐字节核对原指令，地址对不上宁可不装也不能乱写
+    //      C6 44 04 14 00 = mov byte ptr [esp+eax+0x14], 0
+    {
+        static const BYTE expect4[5] = { 0xC6, 0x44, 0x04, 0x14, 0x00 };
+        BYTE* cfin = (BYTE*)(g_gwBase + HOOK_CONCATFIN_RVA);
+        if (memcmp(cfin, expect4, 5) != 0)
+        {
+            log_msg("[CJK] !! 0x%X 字节不符（%02X %02X %02X %02X %02X），跳过 hook4\n",
+                    HOOK_CONCATFIN_RVA, cfin[0], cfin[1], cfin[2], cfin[3], cfin[4]);
+        }
+        else
+        {
+            memcpy(g_origConcatFin, cfin, 5);
+            if (VirtualProtect(cfin, 5, PAGE_EXECUTE_READWRITE, &oldProt))
+            {
+                cfin[0] = 0xE9;
+                rel = (DWORD)cjk_concat_fin_trampoline_impl - ((DWORD)cfin + 5);
+                memcpy(cfin + 1, &rel, 4);
+                VirtualProtect(cfin, 5, oldProt, &oldProt);
+                FlushInstructionCache(GetCurrentProcess(), cfin, 5);
+                g_hookedConcatFin = TRUE;
+                log_msg("[CJK] v16f 拼接收尾 hook: 0x%X -> %08X\n",
+                        HOOK_CONCATFIN_RVA, (DWORD)cjk_concat_fin_trampoline_impl);
+            }
+        }
+    }
+
+    // ── v16f hook 5：0x100F9B59（绘制前拷贝的 strlen）──
+    //      8B C8 8D 71 01 = mov ecx,eax; lea esi,[ecx+1]
+    {
+        static const BYTE expect5[5] = { 0x8B, 0xC8, 0x8D, 0x71, 0x01 };
+        BYTE* dlen = (BYTE*)(g_gwBase + HOOK_DRAWLEN_RVA);
+        if (memcmp(dlen, expect5, 5) != 0)
+        {
+            log_msg("[CJK] !! 0x%X 字节不符（%02X %02X %02X %02X %02X），跳过 hook5\n",
+                    HOOK_DRAWLEN_RVA, dlen[0], dlen[1], dlen[2], dlen[3], dlen[4]);
+        }
+        else
+        {
+            memcpy(g_origDrawLen, dlen, 5);
+            if (VirtualProtect(dlen, 5, PAGE_EXECUTE_READWRITE, &oldProt))
+            {
+                dlen[0] = 0xE9;
+                rel = (DWORD)cjk_draw_len_trampoline_impl - ((DWORD)dlen + 5);
+                memcpy(dlen + 1, &rel, 4);
+                VirtualProtect(dlen, 5, oldProt, &oldProt);
+                FlushInstructionCache(GetCurrentProcess(), dlen, 5);
+                g_hookedDrawLen = TRUE;
+                log_msg("[CJK] v16f 绘制长度 hook: 0x%X -> %08X\n",
+                        HOOK_DRAWLEN_RVA, (DWORD)cjk_draw_len_trampoline_impl);
+            }
+        }
+    }
+
     log_msg("[CJK] EnclaveCJK " CJK_VERSION " Hook 安装成功：0x%X -> %08X"
-            " (base=%08X, tfstr=%d, clen=%d)\n",
-            HOOK_RVA, (DWORD)hook, g_gwBase, g_hookedTfstr, g_hookedConcatLen);
+            " (base=%08X, tfstr=%d, clen=%d, cfin=%d, dlen=%d)\n",
+            HOOK_RVA, (DWORD)hook, g_gwBase, g_hookedTfstr, g_hookedConcatLen,
+            g_hookedConcatFin, g_hookedDrawLen);
     return TRUE;
 }
 
