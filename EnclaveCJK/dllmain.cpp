@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18g"
+#define CJK_VERSION "v18h"
 
 #include "pch.h"
 
@@ -316,7 +316,8 @@ static void process_subtitle_text(DWORD dataHead)
                     j++;
                 WORD wlook = (j < 120) ? data[j] : 0;
                 if (wlook != 0 && !is_body_char(wlook)) break;
-                data[i] = (w == 0x20) ? 0x3000 : (w + 0xFEE0);  // 全角化
+                if (w == 0x7C) { /* v18h：引擎换行符 0x7C 保持原样（渲染器识别为换行；0xFF5C 全角竖线不换行 → 教程 | 换行不生效根因）*/ }
+                else data[i] = (w == 0x20) ? 0x3000 : (w + 0xFEE0);  // 全角化
                 lastValid = i;
                 continue;
             }
@@ -1900,11 +1901,13 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         dec  ebx
         jnz  k_fill
     k_done:
-        ; 推进 = 2*len（与原逻辑 lea eax,[edi+edi]; add ebp,eax 一致）
-        mov  eax, [esp + 0x28]          ; len
+        ; ★ v18h：推进 = 2*实际写入数（edx）——v14 对窄键名越界（'SPACE 7字节→v14=11），
+        ;   用 v14 推进会在键名后留 4 全角空格（用户抱怨「大量空格」）；
+        ;   改推进 = 2*实际 → 主循环 v4 紧凑 → 键名段后直接接后续文本，无空格尾巴
+        mov  eax, edx                   ; 实际写入字符数（k_nloop/k_wloop 每写 1 字符 inc edx）
         shl  eax, 1
-        add  [esp + 0x08], eax          ; 保存的 EBP += 2*len
-        add  [esp + 0x04], eax          ; 保存的 ESI += 2*len
+        add  [esp + 0x08], eax          ; 保存的 EBP += 2*实际
+        add  [esp + 0x04], eax          ; 保存的 ESI += 2*实际
         popad
         add  esp, 0x0C                  ; 清 3 参数（src/0x01/len）
         xor  eax, eax                   ; ax=0 → 0x10ABF9 test ax,ax 命中 jz → 内层退出
