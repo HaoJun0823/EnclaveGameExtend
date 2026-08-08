@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16y"
+#define CJK_VERSION "v16z"
 
 #include "pch.h"
 
@@ -1356,17 +1356,19 @@ static void __declspec(naked) cjk_keyname_hook_impl(void)
 {
     __asm
     {
-        ; 进入：栈 [ret_to_caller, ret_ptr, index]（__thiscall，CStr 按值返回）
+        ; 进入：栈 [ret_to_caller, ret_ptr, index]，this = ecx（__thiscall！）
+        ; ★ v16z：绝不能用 ecx 传 post 地址——会覆盖 this，原函数 [ecx+0xC] 崩溃
+        ;   （v16y 崩溃：dmp ExceptionAddr=0x3458d = GetKeyName 内 cmp edi,[eax+4]）
         push ebp
         mov  ebp, esp
         push eax
-        mov  ecx, cjk_keyname_post_addr  ; post 地址
         mov  eax, [ebp + 4]              ; 原返回地址
         mov  g_keyNameOrigRet, eax       ; 保存 → post 里 jmp 回
-        mov  [ebp + 4], ecx              ; 替换 → 原函数 ret 8 后先到 post
+        mov  eax, cjk_keyname_post_addr  ; post 地址
+        mov  [ebp + 4], eax              ; 替换 → 原函数 ret 8 后先到 post
         pop  eax
         pop  ebp
-        jmp  dword ptr [g_keyNameTramp]  ; 跳板：原 6 字节 + jmp 原函数+6
+        jmp  dword ptr [g_keyNameTramp]  ; 跳板：原 6 字节 + jmp 原函数+6（this 仍在 ecx）
     }
 }
 
