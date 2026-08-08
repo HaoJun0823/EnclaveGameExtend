@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16w"
+#define CJK_VERSION "v16x"
 
 #include "pch.h"
 
@@ -952,18 +952,23 @@ static void* g_findKeyTramp = NULL;
 static BOOL  g_hookedFindKey = FALSE;
 static DWORD g_keyCaller = 0;              // hook_impl 保存的原调用者返回地址
 
-// 大小写不敏感 ASCII 比较（免 string.h 依赖）
-static int key_eq(const char* a, const char* b)
+// 大小写不敏感 ASCII 比较（免 string.h 依赖）。maxn 上限防 a2 非 0 结尾越界读。
+static int key_eq_n(const char* a, const char* b, int maxn)
 {
-    while (*a && *b)
+    int n = 0;
+    while (n < maxn && *a && *b)
     {
         char ca = *a, cb = *b;
         if (ca >= 'A' && ca <= 'Z') ca += 32;
         if (cb >= 'A' && cb <= 'Z') cb += 32;
         if (ca != cb) return 0;
-        a++; b++;
+        a++; b++; n++;
     }
-    return *a == 0 && *b == 0;
+    return (n == maxn || (*a == 0 && *b == 0)) ? 1 : 0;
+}
+static int key_eq(const char* a, const char* b)
+{
+    return key_eq_n(a, b, 39);
 }
 
 // 键名 → 汉字映射表（UTF-16 码位数组，规避源文件编码问题）
@@ -1078,25 +1083,25 @@ static void key_replace(WORD* t, int maxw)
                 i = newstart + rlen;
                 continue;
             }
-            // ★ v16w：未命中映射但被引号包裹（= 键名，如 'MOUSEBUTTON1'）→
-            //   剥引号 + 全角化（半角字母数字 +0xFEE0 → 全角，等长原地转换）。
+            // ★ v16x 修正（v16w 崩溃）：未命中映射但被引号包裹（= 键名，如 'MOUSEBUTTON1'）→
+            //   前/后引号 → 全角空格 0x3000，token 字母数字 → 全角（+0xFEE0）。
+            //   全部【等长原地替换，零 memmove、零移动】——v16w 用 memmove 覆盖了 token 再全角化
+            //   错误位置，破坏文本结构 → ntdll 内存函数崩溃（dmp 实证 ExceptionAddr=ntdll）。
             //   新字库（GB2312 全字符集）A3 区有全角字母数字字形（v16u 的 ′ 实证）。
             if (strip_lead || strip_trail)
             {
-                int newstart = i - strip_lead;
-                int oldend = j + strip_trail;
-                int total = 0, q;
-                while (t[total]) total++;
-                if (oldend <= total)
-                    memmove(t + newstart, t + oldend,
-                            (total + 1 - oldend) * sizeof(WORD));
-                for (q = 0; q < tl && q < maxw - newstart; q++)
+                int q;
+                if (strip_lead && i > 0)
+                    t[i - 1] = 0x3000;                      // 前引号 → 全角空格（等长）
+                if (strip_trail && j < maxw)
+                    t[j] = 0x3000;                          // 后引号 → 全角空格（等长）
+                for (q = 0; q < tl && i + q < maxw; q++)
                 {
-                    WORD c = t[newstart + q];
+                    WORD c = t[i + q];
                     if (c >= 0x21 && c <= 0x7E)
-                        t[newstart + q] = (WORD)(c + 0xFEE0);   // 半角 → 全角
+                        t[i + q] = (WORD)(c + 0xFEE0);      // 半角字母数字 → 全角（等长）
                 }
-                i = newstart + tl;
+                i = j + strip_trail;
                 continue;
             }
             i = j;
@@ -1128,10 +1133,15 @@ static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
         kl = 0;
         __try { while (k[kl] && kl < 40) kl++; }
         __except (EXCEPTION_EXECUTE_HANDLER) { kl = 0; }
+        // ★ v16x：**先替换**（永远执行，不因日志配额跳过）——
+        //   v16w 把 key_replace 放在配额判断之后，同 key 第 4 次查表起不再替换 →
+        //   STD_LOADING 每帧查表刷满后，教程键名原样渲染（@@@ 根源之一）。
+        //   键名→汉字映射。数据 = [标志 WORD(bit15 宽)][UTF-16 正文] → 正文从 data+1 起。
+        key_replace(data + 1, 512);
         // ★ v16w：per-key 配额——每个 key 最多记 3 次（替换前/后配对）。
         //   v16v 全局 300 条被加载界面 STD_LOADING（每帧查表）刷爆 → 教程（游戏内）的
         //   FindKeyValue 调用被配额掩盖 → 「教程不走 FindKeyValue」结论不可靠。
-        //   按 key 计数，同 key 第 4 次起跳过 → STD_LOADING 只占 3 条，TUTORIAL_* 必可记录。
+        //   按 key 计数，同 key 第 4 次起只替换不记录 → STD_LOADING 占 3 条，TUTORIAL_* 必可记录。
         seenCnt = 0;
         for (i = 0; i < s_keySeenN && i < 64; i++)
             if (key_eq(s_keySeen[i], k))
@@ -1167,8 +1177,6 @@ static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
                 CloseHandle(h);
             }
         }
-        // 键名→汉字映射。数据 = [标志 WORD(bit15 宽)][UTF-16 正文] → 正文从 data+1 起。
-        key_replace(data + 1, 512);
         // 替换后 dump
         p = sb;
         p += wsprintfA(p, "[KEY->%ld]       | ", n);
