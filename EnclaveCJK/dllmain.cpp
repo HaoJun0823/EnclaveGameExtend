@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v17d"
+#define CJK_VERSION "v18"
 
 #include "pch.h"
 
@@ -1695,6 +1695,102 @@ static int install_getval_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ★ v18（x64dbg 动态取证定案）：hook Localize_SubstituteKeys 内 call 0x44EA 调用点
+//   （MSystem RVA 0x10ABEA）——§L 键名展开的【最终写入点】！
+//
+//   ◆ x64dbg 断点实证（写断点 @ 0x001A96D1 命中，1 秒内）：
+//     call 0x44EA 前参数：ecx=目标(v4), edx=1(目标宽), esi=0x03FFA3B2(源), edi=0x0B(长度)
+//     源内容 = 27 53 50 41 43 45 27 00 = 'SPACE'（窄 ASCII 8 字节，带单引号包裹！）
+//     但调用 push 0x01 声明【源为宽】→ 0x44EA 按 word 读 → 'S(0x5327) PA(0x4150) CE(0x4543)
+//     伪宽字符 → 渲染器查字形表失败 → 全部回退 @（这就是「按@@@跳跃」的真身）
+//     长度 edi=0x0B=11 也是按"宽字符"算的 → 越界读到堆垃圾 → 目标里出现 07 FF 残留
+//
+//   ◆ 修复：把 5 字节 call 0x44EA 替换为 jmp 到本 handler——
+//     自扫源窄字节（直到 0x00），每个 ASCII 全角化（+0xFEE0）写宽目标，
+//     返回前修正调用者 ebp(目标)/esi(源) 推进，jmp 回 0x10ABF6 继续循环。
+//     这样键名 'SPACE → ＳＰＡＣＥ（全角，GB2312 新字库有字形）→ 正常显示！
+//
+//   ◆ 为什么是这里：教程 §L 展开走 SubstituteKeys（0x10AA20），不经过任何
+//     Localize_Str IAT 槽（v16l-v17d 全部落空的原因）——此调用点是键名写入
+//     渲染缓冲的唯一必经之路。
+// ═══════════════════════════════════════════════════════════════════════
+#define MS_SUBST_CALL_RVA 0x10ABEAu     // call 0x44EA 指令地址（SubstituteKeys 内）
+#define MS_SUBST_BACK_RVA 0x10ABF6u     // 循环继续点（跳过原 lea/add 推进）
+static DWORD g_substBackVA = 0;         // 运行时 = g_msBase + MS_SUBST_BACK_RVA
+static BOOL  g_hookedSubst = FALSE;
+static volatile LONG s_substCount = 0;
+
+// v18 handler：进入时栈 [src, 0x01, len]，ecx=目标(窄指针)，edx=1
+// （jmp 替换 call，无返回地址；栈上 3 参数由本 handler 清理）
+static void __declspec(naked) cjk_subst_key_impl(void)
+{
+    __asm
+    {
+        ; 进入：esp→src, esp+4→0x01, esp+8→len（len 不可信，按 0 结尾扫描）
+        ; ecx = 目标（调用者 mov ecx, ebp 传入）, edx = 1
+        pushad                          ; 保存全部（含调用者的 ecx 目标）
+        mov  esi, [esp + 0x20]          ; esi = 源窄串（pushad 后偏移 0x20）
+        mov  edi, [esp + 0x1C]          ; edi = 原 ecx = 目标指针（pushad 存 ecx @ 0x1C）
+        xor  ebx, ebx                   ; 已写宽字符数
+    subst_loop:
+        movzx eax, byte ptr [esi + ebx] ; 读窄源字节
+        test eax, eax
+        jz   subst_done
+        cmp  eax, 0x20
+        jb   subst_raw
+        cmp  eax, 0x7E
+        ja   subst_raw
+        add  eax, 0xFEE0                ; 半角 0x20-0x7E → 全角（0xFF00-0xFF5E）
+    subst_raw:
+        mov  [edi + ebx*2], ax          ; 写宽字符（每字符 2 字节）
+        inc  ebx
+        cmp  ebx, 64                    ; 安全上限（防越界）
+        jb   subst_loop
+    subst_done:
+        ; ebx = 实际写入宽字符数 N
+        ; 修正 pushad 保存区：ebp(v4目标) += 2*N, esi(v8源) += N
+        ; pushad 布局: [0x00]edi [0x04]esi [0x08]ebp [0x0C]esp [0x10]ebx [0x14]edx [0x18]ecx [0x1C]eax
+        mov  eax, ebx
+        shl  eax, 1
+        add  [esp + 0x08], eax          ; 保存的 ebp += 2*N
+        add  [esp + 0x04], ebx          ; 保存的 esi += N
+        popad
+        add  esp, 0x0C                  ; 清 3 个参数（src/0x01/len）
+        jmp  dword ptr [g_substBackVA]  ; 回 0x10ABF6 继续内层循环
+    }
+}
+
+static int install_subst_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMs;
+    // 期望字节：E8 FB 98 EF FF = call 0x44EA
+    static const BYTE expect[5] = {0xE8, 0xFB, 0x98, 0xEF, 0xFF};
+    if (g_hookedSubst) return 1;
+    hMs = GetModuleHandleA("MSystem.dll");
+    if (!hMs) return 0;
+    g_msBase = (DWORD)hMs;
+    entry = (BYTE*)(g_msBase + MS_SUBST_CALL_RVA);
+    if (memcmp(entry, expect, 5) != 0)
+    {
+        log_msg("[CJK] v18 落点核验失败：%02X %02X %02X %02X %02X，跳过\n",
+                entry[0], entry[1], entry[2], entry[3], entry[4]);
+        return 0;
+    }
+    g_substBackVA = g_msBase + MS_SUBST_BACK_RVA;
+    if (!VirtualProtect(entry, 5, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_subst_key_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, 5, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, 5);
+    g_hookedSubst = TRUE;
+    log_msg("[CJK] v18 SubstituteKeys 键名写入 hook：%08X -> %08X（窄ASCII→全角宽）\n",
+            (DWORD)entry, (DWORD)cjk_subst_key_impl);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ★ v16t：hook CImage::Write（MSystem RVA 0x3DE10）——文本绘制的最终出口！
 //   __thiscall Write(CImage* this, CRct rect(16B), const CStr& text)
 //   text（CStr*）= [esp+0x14]（入口处）。函数头 = mov eax, fs:0（64 A1 00 00 00 00，6 字节）。
@@ -2658,6 +2754,11 @@ static BOOL install_hook(void)
             //   教程渲染用运行时 §L 名（.xrg）查 DYNAMIC → GetValue(PBD) → 返回 '键名'。
             //   post 模式：key 含 TUTORIAL_ → 返回值 data 改写（'键名' → 中文）+ 日志。
             install_getval_hook();
+            // ★ v18（x64dbg 动态取证定案）：hook SubstituteKeys 内 call 0x44EA 调用点——
+            //   §L 键名展开【最终写入点】！教程键名 'SPACE（窄 ASCII）被声明为宽源 →
+            //   0x44EA 按 word 读 → 伪宽字符（'S=0x5327）→ 字形表查不到 → @。
+            //   替换为自扫窄源逐字节全角化写入（键名 → 全角字母，GB2312 新字库有字形）。
+            install_subst_hook();
             // ★ v16t：hook CImage::Write 本体（文本绘制出口，前置全角化 → 覆盖教程/字幕/UI）
             install_draw_hook();
 
