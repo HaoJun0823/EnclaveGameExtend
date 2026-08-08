@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18i"
+#define CJK_VERSION "v19"
 
 #include "pch.h"
 
@@ -1696,6 +1696,108 @@ static int install_getval_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ★ v19（x64dbg 动态取证定案）：hook GetValue 未命中分支 CStr 构造 0x1000960A
+//   ——修复「你拾起了一支火把」→「你拾起了」（低字节 0x00 汉字截断）！
+//
+//   ◆ 截断链路（x64dbg 断点实证 + IDA 反汇编三重印证）：
+//     教程 TEXT（LM01.xrg *TEXT 值）→ GetValue 查表【未命中】→ 0x1000960A（窄版 CStr 构造）
+//       0x1000846A 格式化（按窄 %s 读源）+ 0x10009680 窄 strlen（按字节扫 0x00）
+//       → 「一」= U+4E00（LE 00 4E）低字节 0x00 被当字符串结束 → 截断！
+//     对白（registry 命中）→ 0x100A9B00 → 0x1000976A（拷贝构造，IsWide 判定）
+//       → 首字符「救」0x6551（[1]=0x65）&0x40 → 宽路径 → 完整
+//     教程首字符全角空格 0x3000（[1]=0x30）&0x40=0 → 窄路径 → 截断
+//
+//   ◆ 关键对比（x64dbg 反汇编）：
+//     0x1000960A（窄版）：0x1000846A 窄格式化 + 窄 strlen + [vtable+0x68]（0x1000D88A 窄 Assign）
+//     0x100096BA（宽版）：0x100E8456 宽格式化 + WORD 扫 0x0000 + [vtable+0x88]（宽 Assign）
+//     两者参数布局完全相同（__cdecl：[esp+4]=输出CStr*, [esp+8]=源指针）！
+//
+//   ◆ v19 修复：hook 0x1000960A 入口（6B：64 A1 00 00 00 00 = mov eax,fs:[0]）
+//     → 检测源是否 UTF-16 宽文本（偶数偏移字节==0x00 且下一字节非 0）
+//     → 宽文本：jmp 到宽版 0x100096BA（参数原样，宽版自己 SEH+ret）
+//     → 其他：jmp trampoline（原 6B + jmp 0x10009610）走原逻辑
+// ═══════════════════════════════════════════════════════════════════════
+#define MS_GETVAL_NARROW_RVA 0x960Au    // GetValue 未命中分支窄版 CStr 构造
+#define MS_GETVAL_WIDE_RVA   0x96BAu    // 宽版 CStr 构造（WORD 扫，不截断）
+#define GETVALNARROW_HDR_BYTES 6
+static BYTE  g_origGetValNarrow[GETVALNARROW_HDR_BYTES];
+static void* g_getvalNarrowTramp = NULL;
+static DWORD g_getvalNarrowWideVA = 0;   // 运行时宽版地址（MSystem base + 0x96BA）
+static BOOL  g_hookedGetValNarrow = FALSE;
+
+// v19 handler：hook 0x1000960A 入口（jmp 进入，无返回地址）
+// 进入：esp → 原返回地址, [esp+4]=arg1(输出CStr*), [esp+8]=arg2(源指针)
+static void __declspec(naked) cjk_getval_narrow_impl(void)
+{
+    __asm
+    {
+        ; 源 = [esp+8]
+        mov  eax, [esp + 8]
+        test eax, eax
+        jz   gn_orig            ; 空源 → 原逻辑
+        ; 扫描前 16 WORD（32 字节）：偶数偏移字节 == 0 && 下一字节非 0 → UTF-16 宽文本
+        xor  ecx, ecx
+    gn_scan:
+        cmp  ecx, 16
+        jae  gn_orig            ; 无特征 → 窄 → 原逻辑
+        movzx edx, byte ptr [eax + ecx*2]
+        test edx, edx
+        jnz  gn_next            ; 偶数偏移非 0 → 下一个
+        movzx edx, byte ptr [eax + ecx*2 + 1]
+        test edx, edx
+        jnz  gn_wide            ; ★ 偶数0 + 后非0 → 宽文本（如「一」00 4E、全角空格 00 30）
+    gn_next:
+        inc  ecx
+        jmp  gn_scan
+    gn_wide:
+        ; ★ 宽文本 → jmp 宽版 0x100096BA（参数原样：esp→返回地址, [esp+4]=this, [esp+8]=源）
+        jmp  dword ptr [g_getvalNarrowWideVA]
+    gn_orig:
+        ; trampoline：原 6B（mov eax,fs:[0]）+ jmp 0x10009610
+        jmp  dword ptr [g_getvalNarrowTramp]
+    }
+}
+
+static int install_getval_narrow_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMs;
+    int i;
+    static const BYTE expect[GETVALNARROW_HDR_BYTES] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00};
+    if (g_hookedGetValNarrow) return 1;
+    hMs = GetModuleHandleA("MSystem.dll");
+    if (!hMs) return 0;
+    entry = (BYTE*)hMs + MS_GETVAL_NARROW_RVA;
+    memcpy(g_origGetValNarrow, entry, GETVALNARROW_HDR_BYTES);
+    for (i = 0; i < GETVALNARROW_HDR_BYTES; i++)
+        if (g_origGetValNarrow[i] != expect[i])
+        {
+            log_msg("[CJK] v19 0x1000960A 头核验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+                    g_origGetValNarrow[0], g_origGetValNarrow[1], g_origGetValNarrow[2],
+                    g_origGetValNarrow[3], g_origGetValNarrow[4], g_origGetValNarrow[5]);
+            return 0;
+        }
+    g_getvalNarrowWideVA = (DWORD)hMs + MS_GETVAL_WIDE_RVA;
+    // trampoline：原 6B + jmp entry+6
+    g_getvalNarrowTramp = VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_getvalNarrowTramp) return 0;
+    memcpy(g_getvalNarrowTramp, g_origGetValNarrow, GETVALNARROW_HDR_BYTES);
+    ((BYTE*)g_getvalNarrowTramp)[GETVALNARROW_HDR_BYTES] = 0xE9;
+    *(DWORD*)((BYTE*)g_getvalNarrowTramp + GETVALNARROW_HDR_BYTES + 1) =
+        ((DWORD)entry + GETVALNARROW_HDR_BYTES) - ((DWORD)g_getvalNarrowTramp + GETVALNARROW_HDR_BYTES + 5);
+    if (!VirtualProtect(entry, GETVALNARROW_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_getval_narrow_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, GETVALNARROW_HDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, GETVALNARROW_HDR_BYTES);
+    g_hookedGetValNarrow = TRUE;
+    log_msg("[CJK] v19 0x1000960A 窄构造 hook：%08X -> %08X（宽文本 jmp 宽版 %08X）\n",
+            (DWORD)entry, (DWORD)cjk_getval_narrow_impl, g_getvalNarrowWideVA);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ★ v18（x64dbg 动态取证定案）：hook Localize_SubstituteKeys 内 call 0x44EA 调用点
 //   （MSystem RVA 0x10ABEA）——§L 键名展开的【最终写入点】！
 //
@@ -2922,6 +3024,10 @@ static BOOL install_hook(void)
             //   教程渲染用运行时 §L 名（.xrg）查 DYNAMIC → GetValue(PBD) → 返回 '键名'。
             //   post 模式：key 含 TUTORIAL_ → 返回值 data 改写（'键名' → 中文）+ 日志。
             install_getval_hook();
+            // ★ v19：hook GetValue 未命中分支窄构造 0x1000960A——修复「你拾起了」截断！
+            //   （教程 TEXT 从 LM01.xrg 读出后 GetValue 查表未命中 → 窄版 CStr 构造
+            //   → 窄格式化遇「一」00 4E 截断；宽文本检测后 jmp 宽版 0x100096BA）
+            install_getval_narrow_hook();
             // ★ v18f：hook 0x10ABEA 调用点（键名'XXX'首字符判别——键名全角化，
             //   宽文本值模拟原 call 0x44EA 原样处理）。
             //   【v18f 禁用 0x44EA 本体 hook】：v18e 实测崩溃（0xC0000096 空跳转）——
