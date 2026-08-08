@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18d"
+#define CJK_VERSION "v18e"
 
 #include "pch.h"
 
@@ -1715,7 +1715,6 @@ static int install_getval_hook(void)
 //     渲染缓冲的唯一必经之路。
 // ═══════════════════════════════════════════════════════════════════════
 #define MS_CONV_BODY_RVA 0x44EAu        // 0x44EA 函数本体（编码转换，__fastcall(ecx,edx)+栈3参）
-#define MS_CONV_PUSH_RVA 0x10ABE0u      // SubstituteKeys 键名调用点 `push 1`（源宽标志）
 static BYTE  g_origConvBody[5];          // 备份原函数头
 static void* g_convTramp = NULL;         // trampoline：原5B + jmp entry+5
 static BOOL  g_hookedConv = FALSE;
@@ -1723,8 +1722,8 @@ static BOOL  g_hookedConv = FALSE;
 // v18d handler：hook 0x44EA 函数本体（正常 call，栈上有返回地址）
 // 进入：ecx=目标(窄指针), edx=目标宽标志(a2), [esp+0]=返回地址,
 //       [esp+4]=源(a3), [esp+8]=源宽标志(a4), [esp+0xC]=长度(a5)
-// 窄源->宽目标（a2==1 && a4==0）：逐字节全角化 -> ret 0x0C
-// 其他：jmp trampoline 走原逻辑（宽文本汉字完全不受影响）
+// 窄源->宽目标（a2==1 && a4==0）且非 § 控制符：逐字节全角化 -> ret 0x0C
+// 其他（含源首字节 0xA7=§，§Z22 前缀保护）：jmp trampoline 走原逻辑
 static void __declspec(naked) cjk_conv_impl(void)
 {
     __asm
@@ -1734,6 +1733,10 @@ static void __declspec(naked) cjk_conv_impl(void)
         jne  conv_orig                  ; 目标不是宽 -> 原逻辑
         cmp  dword ptr [esp + 8], 0
         jne  conv_orig                  ; 源是宽 -> 原逻辑（宽文本汉字不受影响）
+        ; § 保护：源首字节 0xA7（§ 控制符，如 §Z22 窄前缀）→ 原逻辑（不破坏控制符）
+        mov  eax, [esp + 4]             ; 源指针
+        cmp  byte ptr [eax], 0xA7
+        je   conv_orig
         ; -- 窄源->宽目标：逐字节全角化 --
         pushad
         ; pushad 后：[0x20]=返回地址 [0x24]=源 [0x28]=源宽标志 [0x2C]=长度
@@ -1774,7 +1777,6 @@ static void __declspec(naked) cjk_conv_impl(void)
 static int install_conv_hook(void)
 {
     BYTE* entry;
-    BYTE* pushsite;
     DWORD oldProt;
     HMODULE hMs;
     // 0x44EA 函数头期望：8B 44 24 0C 85 C0（mov eax,[esp+0xC]; test eax,eax）
@@ -1783,19 +1785,7 @@ static int install_conv_hook(void)
     hMs = GetModuleHandleA("MSystem.dll");
     if (!hMs) return 0;
     g_msBase = (DWORD)hMs;
-    // 1) patch 0x10ABE0：push 1 -> push 0（源宽标志 a4: 1->0，键名按窄源处理）
-    pushsite = (BYTE*)(g_msBase + MS_CONV_PUSH_RVA);
-    if (pushsite[0] == 0x6A && pushsite[1] == 0x01)
-    {
-        if (VirtualProtect(pushsite, 2, PAGE_EXECUTE_READWRITE, &oldProt))
-        {
-            pushsite[1] = 0x00;
-            VirtualProtect(pushsite, 2, oldProt, &oldProt);
-            FlushInstructionCache(GetCurrentProcess(), pushsite, 2);
-            log_msg("[CJK] v18d 键名调用源宽标志修正：%08X push 1->0\\n", (DWORD)pushsite);
-        }
-    }
-    // 2) hook 0x44EA 本体
+    // hook 0x44EA 本体
     entry = (BYTE*)(g_msBase + MS_CONV_BODY_RVA);
     if (memcmp(entry, expect, 5) != 0)
     {
@@ -1817,6 +1807,139 @@ static int install_conv_hook(void)
     g_hookedConv = TRUE;
     log_msg("[CJK] v18d 0x44EA 本体 hook（窄源->宽目标全角化）：%08X -> %08X\\n",
             (DWORD)entry, (DWORD)cjk_conv_impl);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v18e：0x10ABEA 调用点 handler——【键名特征判别】（v18d push1→0 一刀切失败后回归）
+//
+//   ◆ v18d 教训：0x10ABEA 是所有 §L 宏展开值（不只键名）的通道——把 push 1→0
+//     会把宽中文文本值（加载游戏/难度名）也当窄源 → 逐字节全角化 → 乱码。
+//   ◆ v18e 判别【键名格式约定】：键名 = `'XXX'`（首尾单引号 U+0027）！
+//     - 源首字节 0x27（窄键名 'SPACE）或首 word 0x0027（宽键名）→ 键名 → 全角化
+//     - 其他 → 宽文本值 → 模拟原 call 0x44EA（push 返回地址 0x10ABEF → jmp 原 0x44EA
+//       入口，hook 后 a4=1 走 trampoline 原逻辑）→ 宽文本完全不受影响
+//   ◆ 键名全角化：写满 len 槽（NUL 用全角空格填充），推进 ebp/esi += 2*len，
+//     jmp 回 0x10ABF9（test ax,ax + ax=0 → 内层循环退出）
+// ═══════════════════════════════════════════════════════════════════════
+#define MS_SUBST_CALL_RVA 0x10ABEAu     // call 0x44EA 指令地址（SubstituteKeys 内）
+#define MS_SUBST_BACK_RVA 0x10ABF9u     // 循环退出点（test ax,ax）
+#define MS_SUBST_RET_RVA  0x10ABEFu     // 原 call 返回地址（lea eax,[edi+edi]）
+static DWORD g_substBackVA = 0;         // 运行时 = g_msBase + MS_SUBST_BACK_RVA
+static DWORD g_substRetVA  = 0;         // 运行时 = g_msBase + MS_SUBST_RET_RVA
+static DWORD g_convOrigVA  = 0;         // 运行时 = g_msBase + MS_CONV_BODY_RVA（0x44EA 入口）
+static BOOL  g_hookedSubst = FALSE;
+
+static void __declspec(naked) cjk_subst_key_impl(void)
+{
+    __asm
+    {
+        ; 进入：esp→src, esp+4→0x01(源宽标志), esp+8→len(v14); ecx=目标, edx=1
+        ; 键名判别：首字节 0x27（'）或首 word 0x0027（宽 '）
+        movzx eax, byte ptr [esp]
+        cmp  eax, 0x27
+        je   subst_key
+        movzx eax, word ptr [esp]
+        cmp  eax, 0x0027
+        je   subst_key
+        ; ── 非键名（宽文本值）：模拟原 call 0x44EA ──
+        ;   push 返回地址(0x10ABEF) → jmp 原 0x44EA（hook 入口 → a4=1 → trampoline 原逻辑）
+        push  dword ptr [g_substRetVA]
+        jmp   dword ptr [g_convOrigVA]
+    subst_key:
+        ; ── 键名：全角化写入，写满 len 槽 ──
+        pushad
+        ; pushad 后：[0x20]=src [0x24]=0x01 [0x28]=len
+        mov  esi, [esp + 0x20]          ; 源
+        mov  edi, [esp + 0x18]          ; 原 ecx = 目标（宽）
+        mov  ebx, [esp + 0x28]          ; len
+        xor  edx, edx                   ; 源偏移
+        ; 宽窄判别：byte[1]==0 → 宽键名（逐宽字符）；否则窄键名（逐字节）
+        cmp  byte ptr [esi + 1], 0
+        je   k_wide
+    k_nloop:
+        test ebx, ebx
+        jz   k_done
+        movzx eax, byte ptr [esi + edx]
+        test eax, eax
+        jz   k_fill
+        cmp  eax, 0x20
+        jb   k_nraw
+        cmp  eax, 0x7E
+        ja   k_nraw
+        add  eax, 0xFEE0                ; 半角 → 全角
+    k_nraw:
+        mov  [edi], ax
+        add  edi, 2
+        inc  edx
+        dec  ebx
+        jmp  k_nloop
+    k_wide:
+        ; 宽键名：逐宽字符（ASCII 全角化）
+    k_wloop:
+        test ebx, ebx
+        jz   k_done
+        movzx eax, word ptr [esi + edx*2]
+        test eax, eax
+        jz   k_fill
+        cmp  eax, 0x20
+        jb   k_wraw
+        cmp  eax, 0x7E
+        ja   k_wraw
+        add  eax, 0xFEE0
+    k_wraw:
+        mov  [edi], ax
+        add  edi, 2
+        inc  edx
+        dec  ebx
+        jmp  k_wloop
+    k_fill:
+        mov  word ptr [edi], 0x3000     ; 全角空格填充剩余槽
+        add  edi, 2
+        dec  ebx
+        jnz  k_fill
+    k_done:
+        ; 推进 = 2*len（与原逻辑 lea eax,[edi+edi]; add ebp,eax 一致）
+        mov  eax, [esp + 0x28]          ; len
+        shl  eax, 1
+        add  [esp + 0x08], eax          ; 保存的 EBP += 2*len
+        add  [esp + 0x04], eax          ; 保存的 ESI += 2*len
+        popad
+        add  esp, 0x0C                  ; 清 3 参数（src/0x01/len）
+        xor  eax, eax                   ; ax=0 → 0x10ABF9 test ax,ax 命中 jz → 内层退出
+        jmp  dword ptr [g_substBackVA]
+    }
+}
+
+static int install_subst_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMs;
+    // 期望字节：E8 FB 98 EF FF = call 0x44EA
+    static const BYTE expect[5] = {0xE8, 0xFB, 0x98, 0xEF, 0xFF};
+    if (g_hookedSubst) return 1;
+    hMs = GetModuleHandleA("MSystem.dll");
+    if (!hMs) return 0;
+    g_msBase = (DWORD)hMs;
+    entry = (BYTE*)(g_msBase + MS_SUBST_CALL_RVA);
+    if (memcmp(entry, expect, 5) != 0)
+    {
+        log_msg("[CJK] v18e 落点核验失败：%02X %02X %02X %02X %02X，跳过\n",
+                entry[0], entry[1], entry[2], entry[3], entry[4]);
+        return 0;
+    }
+    g_substBackVA = g_msBase + MS_SUBST_BACK_RVA;
+    g_substRetVA  = g_msBase + MS_SUBST_RET_RVA;
+    g_convOrigVA  = g_msBase + MS_CONV_BODY_RVA;
+    if (!VirtualProtect(entry, 5, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_subst_key_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, 5, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, 5);
+    g_hookedSubst = TRUE;
+    log_msg("[CJK] v18e SubstituteKeys 键名写入 hook：%08X -> %08X（键名'XXX'全角化，宽文本值模拟原调用）\n",
+            (DWORD)entry, (DWORD)cjk_subst_key_impl);
     return 1;
 }
 
@@ -2785,11 +2908,11 @@ static BOOL install_hook(void)
             //   教程渲染用运行时 §L 名（.xrg）查 DYNAMIC → GetValue(PBD) → 返回 '键名'。
             //   post 模式：key 含 TUTORIAL_ → 返回值 data 改写（'键名' → 中文）+ 日志。
             install_getval_hook();
-            // ★ v18d（x64dbg 取证 + 四次迭代定案）：根治 §L 键名/文本编码转换——
-            //   ① patch 0x10ABE0 `push 1→0`（键名调用点源宽标志改正，窄键名不再被当宽源）
-            //   ② hook 0x44EA 函数本体：仅「目标宽 && 源窄」时逐字节全角化（+0xFEE0）
-            //      → 键名 'SPACE → ＳＰＡＣＥ；宽文本（汉字）完全不受影响（无判别误伤）
+            // ★ v18d：hook 0x44EA 函数本体（窄源→宽目标全角化，其他调用点受益）
+            // ★ v18e：hook 0x10ABEA 调用点（键名'XXX'特征判别——键名全角化，
+            //   宽文本值模拟原 call 0x44EA 原样处理；回滚 v18d 的 push1→0 一刀切）
             install_conv_hook();
+            install_subst_hook();
             // ★ v16t：hook CImage::Write 本体（文本绘制出口，前置全角化 → 覆盖教程/字幕/UI）
             install_draw_hook();
 
