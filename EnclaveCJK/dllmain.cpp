@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16r"
+#define CJK_VERSION "v16s"
 
 #include "pch.h"
 
@@ -1090,45 +1090,72 @@ static void key_replace(WORD* t, int maxw)
 // post：原函数 ret 后被跳入。栈 [a1, a2]（__cdecl，调用者未清栈）。
 static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
 {
-    static volatile LONG s_n = 0;
-    char sb[640], *p;
+    static char s_keySeen[64][40];
+    static int  s_keySeenN = 0;
+    char sb[900], *p;
     WORD* data;
-    LONG n;
-    int i;
+    const char* k;
+    int i, kl, seenCnt;
     if (!a1) return;
     __try
     {
         data = *(WORD**)(a1 + 4);
         if (!data || data == (WORD*)-2) return;
+        k = (const char*)a2;
+        kl = 0;
+        __try { while (k[kl] && kl < 40) kl++; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { kl = 0; }
+        // ★ v16s：按 key 去重（同 key 最多记 2 次，记录替换前/后）——STD_LOADING 不再刷爆，
+        //   教程的 TUTORIAL_* / KB_* 查表终于能进日志。
+        seenCnt = 0;
+        for (i = 0; i < s_keySeenN && i < 64; i++)
+            if (key_eq(s_keySeen[i], k))
+            {
+                seenCnt++;
+                if (seenCnt >= 2) return;
+            }
+        if (s_keySeenN < 64)
+        {
+            int cp = kl < 39 ? kl : 39;
+            for (i = 0; i < cp; i++) s_keySeen[s_keySeenN][i] = k[i];
+            s_keySeen[s_keySeenN][cp] = 0;
+            s_keySeenN++;
+        }
+        // 替换前 dump
+        p = sb;
+        p += wsprintfA(p, "[KEY] caller=%08X key=", g_keyCaller - g_msBase);
+        for (i = 0; i < kl; i++)
+            p += wsprintfA(p, "%c", (k[i] >= 0x20 && k[i] < 0x7F) ? k[i] : '.');
+        p += wsprintfA(p, " out=%08X | ", a1);
+        for (i = 0; i < 20; i++)
+            p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+        p += wsprintfA(p, "\n");
+        {
+            HANDLE h = CreateFileA("CJK_key_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                   NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (h != INVALID_HANDLE_VALUE)
+            {
+                SetFilePointer(h, 0, NULL, FILE_END);
+                DWORD wn; WriteFile(h, sb, (DWORD)(p - sb), &wn, NULL);
+                CloseHandle(h);
+            }
+        }
         // 键名→汉字映射。数据 = [标志 WORD(bit15 宽)][UTF-16 正文] → 正文从 data+1 起。
         key_replace(data + 1, 512);
-        // 日志（配额 200）
-        n = InterlockedIncrement(&s_n);
-        if (n <= 200)
+        // 替换后 dump
+        p = sb;
+        p += wsprintfA(p, "[KEY->]         | ");
+        for (i = 0; i < 20; i++)
+            p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+        p += wsprintfA(p, "\n");
         {
-            p = sb;
-            p += wsprintfA(p, "[KEY %ld] caller=%08X key=", n, g_keyCaller - g_msBase);
+            HANDLE h = CreateFileA("CJK_key_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                   NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (h != INVALID_HANDLE_VALUE)
             {
-                const char* k = (const char*)a2;
-                int kl = 0;
-                __try { while (k[kl] && kl < 40) kl++; }
-                __except (EXCEPTION_EXECUTE_HANDLER) { kl = 0; }
-                for (i = 0; i < kl; i++)
-                    p += wsprintfA(p, "%c", (k[i] >= 0x20 && k[i] < 0x7F) ? k[i] : '.');
-            }
-            p += wsprintfA(p, " out=%08X | ", a1);
-            for (i = 0; i < 24; i++)
-                p += wsprintfA(p, "%04X ", (unsigned)data[i]);
-            p += wsprintfA(p, "\n");
-            {
-                HANDLE h = CreateFileA("CJK_key_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
-                                       NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-                if (h != INVALID_HANDLE_VALUE)
-                {
-                    SetFilePointer(h, 0, NULL, FILE_END);
-                    DWORD wn; WriteFile(h, sb, (DWORD)(p - sb), &wn, NULL);
-                    CloseHandle(h);
-                }
+                SetFilePointer(h, 0, NULL, FILE_END);
+                DWORD wn; WriteFile(h, sb, (DWORD)(p - sb), &wn, NULL);
+                CloseHandle(h);
             }
         }
     }
