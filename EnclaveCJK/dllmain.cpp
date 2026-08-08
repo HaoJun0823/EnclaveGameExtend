@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16o"
+#define CJK_VERSION "v16p"
 
 #include "pch.h"
 
@@ -832,6 +832,85 @@ static int __stdcall my_TextOutW(void* hdc, int x, int y, const WORD* lp, int c)
         return g_origTextOutW(hdc, x, y, lp, c);
     }
     return 0;
+}
+
+// ★ v16p：hook MSystem Localize_Str(wide) 函数本体 —— 【终极统一】
+//   所有 Localize_Str 变体（CStr/narrow/返回值）最终都调 wide（0x1010AD10）做 §L 展开，
+//   wide 返回后 out（a2）= 最终文本（v16o [POST]「正在加载」实证）。
+//   hook 本体 = 无论调用者走 IAT/直接 call/GetProcAddress，全角化都生效
+//   —— 教程（走返回值变体绕过所有 IAT 槽）也被覆盖。
+#define MS_LOCALIZE_WIDE_RVA 0xAD10u
+static BYTE  g_origLocWideBody[5];
+static void* g_wideTramp = NULL;
+static DWORD g_msBase = 0;
+static BOOL  g_hookedWideBody = FALSE;
+
+static void __cdecl cjk_loc_wide_post_c(const WORD* a1, WORD* out, int cap)
+{
+    safe_fullwidth_expanded((DWORD)out,
+                            (DWORD)_ReturnAddress() - g_msBase, cap);
+}
+
+// 原函数 ret 后被改到的 post（独立 naked 函数，避免编译器 C1001）
+static void __declspec(naked) cjk_loc_wide_post(void)
+{
+    __asm
+    {
+        pushad
+        mov  eax, [esp + 0x20]                   ; a1
+        mov  ecx, [esp + 0x24]                   ; out
+        mov  edx, [esp + 0x28]                   ; cap
+        push edx
+        push ecx
+        push eax
+        call cjk_loc_wide_post_c
+        add  esp, 12
+        popad
+        ret                                      ; 返回原调用者（cdecl，调用者清栈）
+    }
+}
+static DWORD cjk_loc_wide_post_addr = (DWORD)cjk_loc_wide_post;
+
+static void __declspec(naked) cjk_loc_wide_hook_impl(void)
+{
+    __asm
+    {
+        ; 进入：栈 [ret, a1, out, cap]
+        push ebp
+        mov  ebp, esp
+        push eax
+        mov  ecx, cjk_loc_wide_post_addr         ; post 地址
+        mov  eax, [ebp + 4]                      ; 原返回地址
+        mov  [ebp + 4], ecx                      ; 替换 → 原函数 ret 后先到 post
+        pop  eax
+        pop  ebp
+        jmp  dword ptr [g_wideTramp]             ; 跳板：原 5 字节 + jmp 原函数+5
+    }
+}
+
+static int install_wide_body_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    if (g_hookedWideBody) return 1;
+    g_msBase = (DWORD)GetModuleHandleA("MSystem.dll");
+    if (!g_msBase) return 0;
+    entry = (BYTE*)(g_msBase + MS_LOCALIZE_WIDE_RVA);
+    memcpy(g_origLocWideBody, entry, 5);
+    g_wideTramp = VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_wideTramp) return 0;
+    memcpy(g_wideTramp, g_origLocWideBody, 5);
+    ((BYTE*)g_wideTramp)[5] = 0xE9;
+    *(DWORD*)((BYTE*)g_wideTramp + 6) = ((DWORD)entry + 5) - ((DWORD)g_wideTramp + 10);
+    if (!VirtualProtect(entry, 5, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_loc_wide_hook_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, 5, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, 5);
+    g_hookedWideBody = TRUE;
+    log_msg("[CJK] v16p Localize_Str(wide) 本体 hook：%08X -> %08X（终极统一）\n",
+            (DWORD)entry, (DWORD)cjk_loc_wide_hook_impl);
+    return 1;
 }
 
 // 改写一个 IAT 槽：校验通过才写。返回 1 = 成功
@@ -1659,6 +1738,9 @@ static BOOL install_hook(void)
         }
         else
         {
+            // ★ v16p：hook Localize_Str(wide) 函数本体（终极统一——所有变体最终都调它）
+            install_wide_body_hook();
+
             FARPROC pC = GetProcAddress(hMs, "?Localize_Str@@YAXVCStr@@PAGH@Z");
             FARPROC pN = GetProcAddress(hMs, "?Localize_Str@@YAXPBDPAGH@Z");
             FARPROC pW = GetProcAddress(hMs, "?Localize_Str@@YAXPBGPAGH@Z");
