@@ -1,5 +1,27 @@
 ﻿// ============================================================================
-//  EnclaveCJK  v16g   (2026-08-08，v16f 里程碑基础上修闪烁 + 残留句尾 @)
+//  EnclaveCJK  v16i   (2026-08-08)  —— 两个根因一次性定案
+// ============================================================================
+//  【实测反馈】v16h 部署后：① 字幕句尾 @ 仍闪烁（"…用我的——" 末尾）
+//                          ② 教程仍 "按 @@@@ 来跳跃"；CJK_post_log.txt 一条未生成
+//
+//  ★ 根因 A（闪烁 + 句尾 @）：v16g 的抗刷判据【写错了】
+//     v16g 用「WORD 落在 CJK 区 U+4E00–U+9FFF 且 ≥2 个」判字幕，但
+//     ASCII 字节 ∈ 0x20–0x7E，两两拼成 WORD = 0x2020–0x7E7E，与 CJK 区大面积重叠！
+//     实证：v16h 日志 72 条 [H4] 全是 "SND:xxx" 音效名 ——
+//           "SND:Sats_ground" → 4E53('SN') 6153('aS') 7374('ts') 全部落在 CJK 区，
+//           判据形同虚设 ⇒ 音效名被当字幕接管并 len_put 登记 ⇒ 登记表照样被刷爆。
+//     修法：改用与 hook1（第 847-851 行）一致的 strong 判据，两道 ASCII 无法伪造的关：
+//       ① 纯 ASCII 字节流（全 <0x80 且无 0x00）直接放行
+//       ② strong = 低字节不可打印的汉字 / 全角区 U+FF01–U+FFEF
+//          （ASCII 对低字节必可打印、高字节最大 0x7E ⇒ 永不满足）
+//
+//  ★ 根因 B（教程 @@@@）：hook 点覆盖面不够
+//     §L 由 MSystem 的 Localize_Str 内部展开成【玩家绑定按键名】= 半角 ASCII，
+//     而汉化字库（1931 字集）无半角 ASCII 字形 ⇒ 逐字回落 '@'。
+//     v16h 只在调用点 0x20FB2 之后补全角化，但 GameWorld 有 9 处 call Localize_Str(CStr)，
+//     且后处理还带着字幕区间判据 ⇒ 教程走别的点，一次没命中。
+//     修法：改用 IAT hook（GameWorld 3 个变体 + GameClasses 1 个），
+//           一次覆盖全部调用点；安装前用 GetProcAddress 逐项校验，不符不装。
 // ============================================================================
 //  v16f 已确认【全链路保宽 UTF-16LE】路线成立（攀/一/需 等低字节 0x00 汉字整句
 //  正常显示）。残留缺陷：① 字幕闪烁（时有时无）② 句尾仍偶发 @。
@@ -94,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16h"
+#define CJK_VERSION "v16i"
 
 #include "pch.h"
 
@@ -105,13 +127,14 @@
 #define SUB_HI      0x8F000u
 
 #include <windows.h>
+#include <intrin.h>             // ★ v16i：_ReturnAddress()（IAT hook 记录调用者 RVA）
 
 static HMODULE  g_hGameWorld = NULL;
 static DWORD    g_gwBase     = 0;
 static BYTE     g_origBytes[8];
 static DWORD    g_retVA      = 0;
 static DWORD    g_thunkVA    = 0;
-static DWORD    g_postVA     = 0;   // ★ v16h：Localize_Str 返回后处理器地址
+// （v16h 的 g_postVA 已废弃：改用 IAT hook，见 install_hook 中的 iat_hook_one）
 static BOOL     g_hooked     = FALSE;
 static volatile LONG g_hits      = 0;
 static volatile LONG g_subHits   = 0;
@@ -452,10 +475,11 @@ done_proc:
         inc eax
         mov g_hits, eax
         popad
-        ; ★ v16h：不再直接返回 0x20FB7，而是先回到后处理器
-        ;   （§L 宏由 Localize_Str 内部展开，展开产物是半角 ASCII 按键名，
-        ;     必须在 Localize_Str **返回后**才能全角化 —— 见 cjk_post_trampoline_impl）
-        push g_postVA
+        ; ★ v16i：恢复直接返回 0x20FB7。
+        ;   v16h 曾在这里改跳后处理 trampoline，但那样只覆盖 0x20FB2 这一个调用点，
+        ;   而 GameWorld 有 9 处 call Localize_Str(CStr)，教程提示并不走本点
+        ;   （实测 CJK_post_log.txt 一条未生成）。改用 IAT hook 一次覆盖全部调用点。
+        push g_retVA
         jmp dword ptr [g_thunkVA]
     }
 }
@@ -483,7 +507,7 @@ done_proc:
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 #define POST_MAX_WORDS 1000     // out 缓冲 cap = 0x3FF 字符，留余量
 
-static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr)
+static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD callerRva)
 {
     __try
     {
@@ -492,9 +516,44 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr)
         // 取证快照（改写前），只记前若干条
         static volatile LONG s_postLog = 0;
         LONG n = InterlockedIncrement(&s_postLog);
-        int hasAscii = 0;
+
+        // ★ v16i 安全闸：IAT hook 覆盖了【全游戏】的 Localize_Str 调用，
+        //   其中难免有「输出被当作查表 key / 资源名 / 路径」的内部用途。
+        //   对那些做全角化会直接把功能改坏。
+        //   判据：只有【本身含 CJK 汉字或全角字符】的输出才是"要显示给玩家的汉化文本"，
+        //   才允许补全角化；纯 ASCII 输出一律不动（宁可它显示成 @，也不能毁掉内部 key）。
+        //   教程文本展开后 = 「按(全角) SPACE(半角) 来跳跃(全角)」→ 含 CJK ✓ 命中。
+        int hasAscii = 0, hasCjk = 0, nw = 0;
         for (int k = 0; k < POST_MAX_WORDS && out[k] != 0; k++)
-            if (out[k] >= 0x21 && out[k] <= 0x7E) { hasAscii = 1; break; }
+        {
+            WORD c = out[k];
+            if (c >= 0x21 && c <= 0x7E) hasAscii = 1;
+            else if ((c >= 0x4E00 && c <= 0x9FFF) ||    // CJK 统一汉字
+                     (c >= 0x3000 && c <= 0x303F) ||    // CJK 标点
+                     (c >= 0xFF00 && c <= 0xFFEF))      // 全角字符
+                hasCjk = 1;
+            nw = k + 1;
+        }
+        if (!hasCjk)
+        {
+            // 纯 ASCII / 无中文 → 不是玩家可见汉化文本，放行不动。
+            // 仍记少量取证，便于判断是否误伤（前 20 条）。
+            if (hasAscii && n <= 20)
+            {
+                char sb[256];
+                wsprintfA(sb, "[POST-SKIP %ld] caller=%05X out=%08X len=%d (no CJK)\n",
+                          n, callerRva, outPtr, nw);
+                HANDLE hs = CreateFileA("CJK_post_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hs != INVALID_HANDLE_VALUE)
+                {
+                    SetFilePointer(hs, 0, NULL, FILE_END);
+                    DWORD wn; WriteFile(hs, sb, (DWORD)lstrlenA(sb), &wn, NULL);
+                    CloseHandle(hs);
+                }
+            }
+            return;
+        }
 
         int i = 0, fixed = 0;
         while (i < POST_MAX_WORDS)
@@ -515,12 +574,16 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr)
         }
         if (fixed) InterlockedExchangeAdd((volatile LONG*)&g_keyFixed, fixed);
 
-        // ★ 取证：只记"改写前含半角 ASCII"的帧（= §L 展开产物 / 漏网 ASCII），前 40 条
+        // ★ v16i 取证升级：记录【外层调用者 RVA】。
+        //   0x20FB2 是 GameWorld 9 个 Localize_Str(CStr) 调用点之一，其上游还有
+        //   021942 / 021E9B / 03319F / 0334CF / 05E3AF / 05E6DF / 0E3D37 / 0E3E37。
+        //   若教程提示不走本点，这份日志会是空的 —— 那就直接锁定"要改 hook 点"。
         if (hasAscii && n <= 400)
         {
             char buf[1024];
             char* p = buf;
-            p += wsprintfA(p, "[POST %ld] out=%08X len=%d fixed=%d\n", n, outPtr, i, fixed);
+            p += wsprintfA(p, "[POST %ld] caller=%05X out=%08X len=%d fixed=%d\n",
+                           n, callerRva, outPtr, i, fixed);
             for (int k = 0; k < 72 && k < i; k++)
                 p += wsprintfA(p, "%04X ", (unsigned)out[k]);
             p += wsprintfA(p, "\n");
@@ -540,37 +603,118 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr)
     }
 }
 
-// ★ v16h 后处理 trampoline
-//   进入时 esp == 调用点 esp（Localize_Str 是 __cdecl，ret 已弹掉自己的返回地址）：
-//       [esp+0x00..07] = CStr 按值（8 字节）
-//       [esp+0x08]     = wchar_t* out   ← 我们要修的展开结果
-//       [esp+0x0C]     = int cap (0x3FF)
-//       [esp+0x4884]   = 外层函数返回地址（调用者判据，与前置 trampoline 同一槽）
-//   eax = Localize_Str 返回值，必须原样带回 → pushad/popad 保护
-//   收尾 push g_retVA / ret → 回到 0x20FB7（add esp,0x10 由原代码执行）
-static void __declspec(naked) cjk_post_trampoline_impl(void)
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★ v16i：IAT hook —— 一次覆盖【所有】Localize_Str 调用点
+//
+// 【为什么放弃 v16h 的调用点 trampoline】
+//   v16h 在调用点 0x20FB2 之后挂了后处理，实测 CJK_post_log.txt **一条都没生成**。
+//   两个原因叠加：
+//     (a) 后处理还带着字幕区间判据 [0x8D000,0x8F000]，而教程 HUD 提示的外层
+//         返回地址根本不在字幕绘制区 → 被自己的判据挡掉；
+//     (b) 更根本：GameWorld 有 **9 处** call Localize_Str(CStr)
+//         （020FB2 / 021942 / 021E9B / 03319F / 0334CF / 05E3AF / 05E6DF /
+//           0E3D37 / 0E3E37），教程提示大概率不走 0x20FB2 这一处。
+//
+// 【IAT 的好处】这些调用点全都 `call <thunk>`，而 thunk = `jmp [IAT]`
+//   ⇒ 改写 IAT 一项 = 覆盖该变体的全部调用点；
+//   ⇒ 无需 patch 代码字节、无需 naked 汇编、无寄存器纪律风险，纯 C + SEH。
+//
+// 【零风险校验】安装前用 GetProcAddress(MSystem.dll, 修饰名) 取真实导出地址，
+//   与 IAT 槽当前值**逐项比对**，不相等一律不装 —— 宁可不修，绝不写错地址。
+//
+// 【签名】三个变体的 out 缓冲都是第 2 个参数，均为 __cdecl（修饰名 YA 开头）：
+//     ?Localize_Str@@YAXVCStr@@PAGH@Z   void(CStr 按值8字节, WORD* out, int cap)
+//     ?Localize_Str@@YAXPBDPAGH@Z       void(const char*  src, WORD* out, int cap)
+//     ?Localize_Str@@YAXPBGPAGH@Z       void(const WORD*  src, WORD* out, int cap)
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+// IAT 槽位（pe_exports.py 解析导入表实测）
+#define IAT_GW_CSTR_RVA    0x13E540u   // GameWorld  ?Localize_Str@@YAXVCStr@@PAGH@Z
+#define IAT_GW_NARROW_RVA  0x13E534u   // GameWorld  ?Localize_Str@@YAXPBDPAGH@Z
+#define IAT_GW_WIDE_RVA    0x13E530u   // GameWorld  ?Localize_Str@@YAXPBGPAGH@Z
+#define IAT_GC_NARROW_RVA  0x1A72E4u   // GameClasses ?Localize_Str@@YAXPBDPAGH@Z
+
+typedef struct { DWORD lo, hi; } CStrVal;      // CStr 按值 = 8 字节
+
+typedef void (__cdecl *pfn_LocCStr)(CStrVal, WORD*, int);
+typedef void (__cdecl *pfn_LocNarrow)(const char*, WORD*, int);
+typedef void (__cdecl *pfn_LocWide)(const WORD*, WORD*, int);
+
+static pfn_LocCStr   g_origLocCStr   = NULL;
+static pfn_LocNarrow g_origLocNarrow = NULL;
+static pfn_LocWide   g_origLocWide   = NULL;
+static pfn_LocNarrow g_origLocGcNarrow = NULL;   // GameClasses.dll 那一份
+
+static int g_iatCount = 0;                       // 成功改写的 IAT 项数
+
+static void __declspec(noinline) __cdecl my_LocCStr(CStrVal src, WORD* out, int cap)
 {
-    __asm
+    if (!g_origLocCStr) return;
+    g_origLocCStr(src, out, cap);                            // 先让引擎完成 §L 展开
+    InterlockedIncrement((volatile LONG*)&g_postHits);
+    safe_fullwidth_expanded((DWORD)out,
+                            (DWORD)_ReturnAddress() - g_gwBase);
+}
+
+static void __declspec(noinline) __cdecl my_LocNarrow(const char* src, WORD* out, int cap)
+{
+    if (!g_origLocNarrow) return;
+    g_origLocNarrow(src, out, cap);
+    InterlockedIncrement((volatile LONG*)&g_postHits);
+    safe_fullwidth_expanded((DWORD)out,
+                            (DWORD)_ReturnAddress() - g_gwBase);
+}
+
+static void __declspec(noinline) __cdecl my_LocWide(const WORD* src, WORD* out, int cap)
+{
+    if (!g_origLocWide) return;
+    g_origLocWide(src, out, cap);
+    InterlockedIncrement((volatile LONG*)&g_postHits);
+    safe_fullwidth_expanded((DWORD)out,
+                            (DWORD)_ReturnAddress() - g_gwBase);
+}
+
+static DWORD g_gcBase = 0;                       // GameClasses.dll 基址
+
+static void __declspec(noinline) __cdecl my_LocGcNarrow(const char* src, WORD* out, int cap)
+{
+    if (!g_origLocGcNarrow) return;
+    g_origLocGcNarrow(src, out, cap);
+    InterlockedIncrement((volatile LONG*)&g_postHits);
+    // 最高位置 1 标记「来自 GameClasses」，与 GameWorld 的 RVA 一眼可分
+    safe_fullwidth_expanded((DWORD)out,
+                            0x80000000u | ((DWORD)_ReturnAddress() - g_gcBase));
+}
+
+// 改写一个 IAT 槽：校验通过才写。返回 1 = 成功
+static int iat_hook_one(DWORD modBase, DWORD iatRva, FARPROC expected,
+                        void* newFunc, void** pOrig, const char* tag)
+{
+    DWORD* slot;
+    DWORD  oldProt;
+    DWORD  cur;
+
+    if (!modBase || !expected || !newFunc) return 0;
+    slot = (DWORD*)(modBase + iatRva);
+
+    __try
     {
-        pushad
-        mov eax, [esp + 0x48A4]
-        sub eax, g_gwBase
-        cmp eax, SUB_LO
-        jb  post_skip
-        cmp eax, SUB_HI
-        ja  post_skip
-        mov edx, [esp + 0x28]       ; out 缓冲指针（调用点 [esp+8]）
-        push edx
-        call safe_fullwidth_expanded
-        add esp, 4
-        mov eax, g_postHits
-        inc eax
-        mov g_postHits, eax
-post_skip:
-        popad
-        push g_retVA
-        ret
+        cur = *slot;
+        if (cur != (DWORD)expected)
+        {
+            log_msg("[CJK] IAT %s 校验失败：槽 %08X 现值 %08X != 导出 %08X（跳过，不改）\n",
+                    tag, (DWORD)slot, cur, (DWORD)expected);
+            return 0;
+        }
+        if (!VirtualProtect(slot, sizeof(DWORD), PAGE_READWRITE, &oldProt)) return 0;
+        *pOrig = (void*)cur;
+        *slot  = (DWORD)newFunc;
+        VirtualProtect(slot, sizeof(DWORD), oldProt, &oldProt);
+        log_msg("[CJK] IAT %s hook 成功：%08X  %08X -> %08X\n",
+                tag, (DWORD)slot, cur, (DWORD)newFunc);
+        return 1;
     }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
@@ -1113,28 +1257,57 @@ static int __cdecl cjk_concat_finish(void* dst, const BYTE* tmp, int total)
     if (!dst || !tmp) return 0;
     if (total <= 0 || total > LEN_MAXB) return 0;   // 越界一律放行，绝不冒险
 
-    // ★ v16g：纯 ASCII 资源名（SND: 等音效名）不要登记、不要重建。
-    //   它们在 [0x8D000,0x8F000] 区间内高频调用本拼接点（v16f 日志 26 条全是 SND:，
-    //   dst 恒为 001AD7B0），会把登记表刷爆 → 字幕登记被挤出 → 闪烁/句尾@。
-    //   判别：跳过窄前缀（§Z22 占前 2 个 WORD），扫描正文是否含 ≥2 个 CJK 汉字
-    //   （U+4E00–U+9FFF）。ASCII 资源名绝无 CJK → 原样走 copy-ctor（对 ASCII 本就正确）。
+    // ★★ v16i 关键修正：v16g 的抗刷判据【是错的】，导致 SND: 音效名依然被接管+登记。
+    //
+    //   v16g 写法：扫描 WORD 是否落在 CJK 区 U+4E00–U+9FFF，≥2 个即判为字幕。
+    //   实测反证（v16h 日志 72 条 [H4] 全是 "SND:xxx"）：
+    //       "SND:Sats_ground" 的字节按 WORD 误读 = 4E53 3A44 6153 7374 ...
+    //       0x4E53('SN') 0x6153('aS') 0x7374('ts') —— 全部落在 CJK 区！
+    //   根因：ASCII 字节 ∈ 0x20–0x7E，两两拼成 WORD 就是 0x2020–0x7E7E，
+    //         与 CJK 区 0x4E00–0x9FFF 大面积重叠 ⇒ 朴素区间判据对 ASCII 形同虚设。
+    //
+    //   正确判据（与 hook1 第 847-851 行的 strong 逻辑对齐，两道 ASCII 绝无法伪造的关）：
+    //     ① 纯 ASCII 字节流（全部 <0x80 且无 0x00）→ 必是窄资源名，直接放行
+    //     ② strong = 「低字节不可打印的汉字」或「全角区 U+FF01–U+FFEF」
+    //        - 汉字低字节不可打印：ASCII 对的低字节 = 字节[1] ∈ 0x20–0x7E 必可打印 ⇒ 永不满足
+    //        - 全角区高字节 0xFF：ASCII 对最大 0x7E7E ⇒ 永不满足
     {
         const WORD* w = (const WORD*)tmp;
         int nw = total / 2;
-        int cjk = 0;
-        for (i = 2; i < nw && i < 132; i++)          // 跳过前缀 2 WORD，限 130 WORD 防读越界
+        int strong = 0;
+        int allAscii = 1;
+
+        for (i = 0; i < total; i++)                  // ① 纯 ASCII 窄串判定
         {
-            WORD c = w[i];
-            if (c >= 0x4E00 && c <= 0x9FFF) { if (++cjk >= 2) break; }
+            BYTE b = tmp[i];
+            if (b == 0 || b >= 0x80) { allAscii = 0; break; }
         }
-        if (cjk < 2)
+
+        if (!allAscii)                               // ② strong 判据
+        {
+            for (i = 2; i < nw && i < 132; i++)      // 跳过窄前缀 §Z22（2 WORD），限 130 WORD
+            {
+                WORD c = w[i];
+                if (c >= 0x4E00 && c <= 0x9FFF)
+                {
+                    BYTE lo = (BYTE)(c & 0xFF);
+                    if (lo < 0x20 || lo > 0x7E) strong++;   // 低字节不可打印 ⇒ 真汉字
+                }
+                else if (c >= 0xFF01 && c <= 0xFFEF) strong++;  // 全角（高字节 0xFF）
+                if (strong >= 2) break;
+            }
+        }
+
+        if (allAscii || strong < 2)
         {
             static volatile LONG s_skip = 0;
-            if (InterlockedIncrement(&s_skip) <= 8)
+            // 纯 ASCII 是已知噪声，不占诊断配额；只记「像宽串却没达标」的可疑帧
+            if (!allAscii && InterlockedIncrement(&s_skip) <= 12)
             {
                 char b[160];
-                wsprintfA(b, "[H4-SKIP] dst=%08X total=%3d | %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
-                          (DWORD)dst, total, tmp[0],tmp[1],tmp[2],tmp[3],tmp[4],tmp[5],tmp[6],tmp[7]);
+                wsprintfA(b, "[H4-SKIP] dst=%08X total=%3d strong=%d | %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                          (DWORD)dst, total, strong,
+                          tmp[0],tmp[1],tmp[2],tmp[3],tmp[4],tmp[5],tmp[6],tmp[7]);
                 diag_write(b);
             }
             return 0;                                // 非字幕 → 放行原 copy-ctor
@@ -1316,7 +1489,41 @@ static BOOL install_hook(void)
     g_gwBase = (DWORD)g_hGameWorld;
     g_retVA = g_gwBase + RET_VA;
     g_thunkVA = g_gwBase + THUNK_RVA;
-    g_postVA = (DWORD)cjk_post_trampoline_impl;   // ★ v16h：Localize_Str 返回后处理
+
+    // ★ v16i：IAT hook —— 覆盖所有 Localize_Str 调用点（§L 展开产物全角化）
+    {
+        HMODULE hMs = GetModuleHandleA("MSystem.dll");
+        if (!hMs)
+        {
+            log_msg("[CJK] MSystem.dll 未加载，IAT hook 跳过（§L 全角化不生效）\n");
+        }
+        else
+        {
+            FARPROC pC = GetProcAddress(hMs, "?Localize_Str@@YAXVCStr@@PAGH@Z");
+            FARPROC pN = GetProcAddress(hMs, "?Localize_Str@@YAXPBDPAGH@Z");
+            FARPROC pW = GetProcAddress(hMs, "?Localize_Str@@YAXPBGPAGH@Z");
+            HMODULE hGc;
+
+            g_iatCount += iat_hook_one(g_gwBase, IAT_GW_CSTR_RVA,   pC,
+                                       (void*)my_LocCStr,   (void**)&g_origLocCStr,   "GW/CStr");
+            g_iatCount += iat_hook_one(g_gwBase, IAT_GW_NARROW_RVA, pN,
+                                       (void*)my_LocNarrow, (void**)&g_origLocNarrow, "GW/narrow");
+            g_iatCount += iat_hook_one(g_gwBase, IAT_GW_WIDE_RVA,   pW,
+                                       (void*)my_LocWide,   (void**)&g_origLocWide,   "GW/wide");
+
+            hGc = GetModuleHandleA("GameClasses.dll");
+            if (hGc)
+            {
+                g_gcBase = (DWORD)hGc;
+                g_iatCount += iat_hook_one(g_gcBase, IAT_GC_NARROW_RVA, pN,
+                                           (void*)my_LocGcNarrow, (void**)&g_origLocGcNarrow, "GC/narrow");
+            }
+            else
+            {
+                log_msg("[CJK] GameClasses.dll 未加载，跳过其 IAT（可稍后由 wait_thread 重试）\n");
+            }
+        }
+    }
 
     DWORD oldProt;
     // ── 原有 hook：0x20FB2（字幕 Localize_Str 判据）──
@@ -1422,9 +1629,9 @@ static BOOL install_hook(void)
     }
 
     log_msg("[CJK] EnclaveCJK " CJK_VERSION " Hook 安装成功：0x%X -> %08X"
-            " (base=%08X, tfstr=%d, clen=%d, cfin=%d, dlen=%d, post=%08X)\n",
+            " (base=%08X, tfstr=%d, clen=%d, cfin=%d, dlen=%d, iat=%d/4)\n",
             HOOK_RVA, (DWORD)hook, g_gwBase, g_hookedTfstr, g_hookedConcatLen,
-            g_hookedConcatFin, g_hookedDrawLen, g_postVA);
+            g_hookedConcatFin, g_hookedDrawLen, g_iatCount);
     return TRUE;
 }
 

@@ -1,0 +1,10 @@
+﻿WindowsKits exists: False
+KIT10: Catalogs
+KIT10: Debuggers
+KIT10: Redist
+KIT10: UnionMetadata
+KIT10: Windows Performance Toolkit
+--- search windows.h ---
+--- VC include ---
+VC inc exists: True
+
