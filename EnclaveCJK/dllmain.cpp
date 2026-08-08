@@ -1,17 +1,41 @@
-﻿// EnclaveCJK v17r 恢复版（= v16.7 逻辑，用户确认"能显示@@中文"的版本）
+﻿// ============================================================================
+//  EnclaveCJK  v16b   (2026-08-08，止血 + 三缺陷同修版)
+// ============================================================================
+//  背景：v18~v20.2 一路激进改渲染路径，全部失败并造成倒退。本版【停止试探】，
+//        回到 v15b 已验证可用的三 hook 架构，只做定点修正。
 //
-// v17r 逻辑（v20.2 失败后回滚，2026-08-08 07:12）：
-//   hook GameWorld 0x20FB2（原 call 0x101005C4 Localize_Str）
-//   判据：[esp+0x48A4] RVA ∈ [0x8D000,0x8F000]
-//   处理：[esp+0x24] = data_head → 置宽 flags|0x8000 + 剥§Z + ASCII→全角
-//   日志：字幕每次 + 非字幕每 500 条（限流）
+//  已安装 hook（3 个）：
+//    [0] 0x20FB2  Localize_Str 调用点 —— 字幕文本入口（实证 sub=28746 条经过）
+//                 判据：[esp+0x48A4] RVA ∈ [0x8D000,0x8F000]
+//                 处理：置宽 flags|0x8000 → 剥 §Z → 残留终止符截断 → ASCII 全角化
+//    [1] 0x54F00  TFStr<252> 宽构造（hook1），调用者白名单过滤
+//    [2] 0x8ED1A  拼接长度修正（hook3），调用者区间过滤
 //
-// ★ v20.2 结论（07:10）：vtable 替换（Util2D vtable+0xB8 → fake stub）
-//   即使 pushfd/popfd 保护 EFLAGS + 纯汇编零副作用，字幕仍乱码。
-//   → vtable 替换路径彻底不可行（7+2 次尝试全失败）。
-//   → 字幕渲染路径（0x10020F60 / vtable+184 / 拼接/GetKey）不可 hook。
-//   → 字幕中文 = 引擎原样渲染（字库补齐后 UTF-16 天然正确）。
-//   → "前面固定@@ / 尾部@@@@ / 闪烁" = 引擎原样渲染 §Z22 前缀 + 缓冲垃圾。
+//  ── 本版修正的三个缺陷 ────────────────────────────────────────────────
+//   (1) hook3 入口崩溃（0xC0000005）
+//       根因：TFStr<252> 字符数据【内联】在对象 +4，旧码写成 mov eax,[eax+4]
+//             把内联字符当指针解引用。
+//       修正：改 lea eax,[eax+4]；并加【调用者区间过滤】(sub_1008ECE0 有 7 个
+//             调用者，仅字幕区 [0x8D000,0x8F000] 才改长度，资源名等原样放行)。
+//       v16b 追加：NULL 守卫必须在 lea 之【前】，否则 NULL→4 会绕过判空再次崩溃。
+//
+//   (2) "攀上" 类整句截断
+//       根因：低字节为 0x00 的汉字被单字节 strlen 提前截断；且 hook1 调用者
+//             白名单漏了第 4 个字幕构造点 0x8DDE3（call 0x54F00 @ 0x8DDDE）。
+//       修正：补回 TFSTR_CALLER_4 = 0x8DDE3。
+//
+//   (3) 句尾 @@@@ / 闪烁
+//       现象：用户实测 —— 全角逗号(，0xFF0C)结尾正常；句号(。0x3002)结尾出 @@@@。
+//       推断：。经引擎窄字节渲染成 GBK A1 A3，A3 无字形 → 回落 '@'。
+//             渲染执行流已证明不可 hook，故在【文本阶段】把 。换成半角 .(U+002E)。
+//       作用域：仅已确认的字幕正文 [0,lastValid]，且放在主循环之后，
+//               避免被 ASCII 全角化再次变回全角。
+//
+//  ★ 不要重走的死路（累计 9 次失败）：
+//     vtable 替换 / 渲染路径 hook（0x10020F60、vtable+0xB8、拼接调用、GetKey、
+//     终止符写入 0x8ED9A）—— 全部导致乱码或崩溃。
+// ============================================================================
+#define CJK_VERSION "v16b"
 
 #include "pch.h"
 
@@ -173,6 +197,14 @@ static void process_subtitle_text(DWORD dataHead)
     if (lastValid > 116) lastValid = 116;               // 上限保险（清 0 范围 117..121 仍在 120 内）
     for (int j = lastValid + 1; j < lastValid + 6 && j < 120; j++)
         data[j] = 0;
+
+    // ★ 句号 @@@@ 根治（v16, 2026-08-08）：。（U+3002）经引擎 GBK 窄字节渲染 → A1 A3，
+    //   第二字节 A3 在字库无对应字形 → 显示 @@@@ / 闪烁（用户实测：逗号结尾无 @@@@、句号结尾有）。
+    //   渲染执行流不可 hook，故在此（字幕宽文本阶段，且 0x20FB2 已实证对字幕生效）把 。
+    //   替换为半角 .（U+002E，单字节 0x2E，字库必有字形）。仅作用于已确认字幕正文 [0,lastValid]，
+    //   不动资源名等窄串；且放在主循环之后，避免被 ASCII 全角化再次变成全角句点。
+    for (int i = 0; i <= lastValid && i < 120; i++)
+        if (data[i] == 0x3002) data[i] = 0x002E;
 
     // ★ 取证日志：前 25 条 + 坏帧（rawLen>25）+ 每 100 条 + 正文残留 @ 形态
     {
@@ -342,6 +374,7 @@ static BOOL g_hookedTfstrLen = FALSE;
 #define TFSTR_CALLER_1       0x8DD09u
 #define TFSTR_CALLER_2       0x8DD31u
 #define TFSTR_CALLER_3       0x8E362u
+#define TFSTR_CALLER_4       0x8DDE3u    // ★ v16：补回漏掉的第 4 个字幕构造调用点（call 0x54F00 @ 0x8DDDE）
 static void __declspec(naked) cjk_tfstr_trampoline_impl(void)
 {
     __asm
@@ -354,6 +387,8 @@ static void __declspec(naked) cjk_tfstr_trampoline_impl(void)
         cmp eax, TFSTR_CALLER_2
         je  tfstr_check
         cmp eax, TFSTR_CALLER_3
+        je  tfstr_check
+        cmp eax, TFSTR_CALLER_4
         je  tfstr_check
         jmp tfstr_fallback           ; 非字幕调用 → 原逻辑
     tfstr_check:
@@ -465,20 +500,33 @@ static void __declspec(naked) cjk_concat_len_trampoline_impl(void)
         ; 重放原指令（0x1008ED1A-0x1E）
         call dword ptr [edx + 0x64]     ; 正文 GetLength → eax
         mov edi, eax
-        ; ★ 修正：检测正文 UTF-16 → 重算字节数（wcslen × 2）
+        ; ★ v16 调用者过滤：sub_1008ECE0 共 7 个调用者，仅 0x8DD44/0x8E37C（返回地址落在
+        ;   [0x8D000,0x8F000] 字幕区）是字幕拼接；其余为资源名/字符串处理。
+        ;   非字幕调用者 → 原 GetLength 结果 eax 已正确（窄串），直接返回，绝不误改长度。
+        ;   [ebp+4] = sub_1008ECE0 调用者的返回地址（sub_1008ECE0 入口 push ebp;mov ebp,esp）
+        mov eax, ebp
+        mov eax, [eax + 4]
+        sub eax, g_gwBase
+        cmp eax, SUB_LO
+        jb  tcl_return
+        cmp eax, SUB_HI
+        ja  tcl_return
+        ; ★ 修正：UTF-16 正文 → 重算字节数（wcslen × 2）
         pushad
         mov eax, [ebp + 0xc]            ; 正文对象
-        mov eax, [eax + 4]              ; data（TFStr GetData = [对象+4]）
-        test eax, eax
-        jz  tcl_done
+        ; ★ v16b NULL/野指针守卫：必须在 lea 之【前】判空。
+        ;   若写成 lea 后再 test，NULL 会变成 4 而通过检查，随后读 [4+1] → 0xC0000005。
+        cmp eax, 0x10000                ; 低 64K 为不可访问保留区
+        jb  tcl_pop
+        lea eax, [eax + 4]              ; ★ FIX：TFStr<252> 数据【内联】在 +4，不是指针！
         ; UTF-16 检测：字节[1]==0（ASCII UTF-16）或 字节[1]∈[0x4E,0xA0)（CJK UTF-16）
         movzx ecx, byte ptr [eax + 1]
         test ecx, ecx
         jz  tcl_utf16
         cmp ecx, 0x4E
-        jb  tcl_done                    ; <0x4E → 窄
+        jb  tcl_pop                     ; <0x4E → 窄
         cmp ecx, 0xA0
-        jae tcl_done                    ; >=0xA0 → 窄（UTF-8/GBK 首字节/续字节）
+        jae tcl_pop                     ; >=0xA0 → 窄（UTF-8/GBK 首字节/续字节）
     tcl_utf16:
         xor ecx, ecx
     tcl_loop:
@@ -490,9 +538,10 @@ static void __declspec(naked) cjk_concat_len_trampoline_impl(void)
     tcl_utf16_done:
         lea eax, [ecx*2]                ; 字节数 = 字符 × 2
         mov [esp + 0x1C], eax           ; 写回 pushad 的 eax 槽
-    tcl_done:
+    tcl_pop:
         popad
         mov edi, eax                    ; edi = 修正后长度
+    tcl_return:
         mov eax, g_gwBase
         add eax, CONCATLEN_RET_RVA      ; 跳回 0x1008ED1F
         jmp eax
@@ -556,7 +605,8 @@ static BOOL install_hook(void)
         log_msg("[CJK] v15b 拼接长度修正 hook: 0x%X -> %08X\n", HOOK_CONCATLEN_RVA, (DWORD)cjk_concat_len_trampoline_impl);
     }
 
-    log_msg("[CJK] Hook 安装成功：0x%X -> %08X (base=%08X, tfstr=%d, clen=%d)\n",
+    log_msg("[CJK] EnclaveCJK " CJK_VERSION " Hook 安装成功：0x%X -> %08X"
+            " (base=%08X, tfstr=%d, clen=%d)\n",
             HOOK_RVA, (DWORD)hook, g_gwBase, g_hookedTfstr, g_hookedConcatLen);
     return TRUE;
 }
