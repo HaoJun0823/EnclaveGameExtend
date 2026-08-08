@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18f"
+#define CJK_VERSION "v18g"
 
 #include "pch.h"
 
@@ -608,7 +608,7 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
                 continue;
             }
             if (w == 0x2E)              { out[i] = 0x3002;             fixed++; }  // v16n：半角点→全角句号（0xFF0E 字库无字形→@，0x3002 确定有）
-            else if (w == 0x7C)         { out[i] = 0x000A;             fixed++; }  // v16o：|(引擎换行符)→0x0A 换行（渲染器不渲染 0x0A）
+            else if (w == 0x7C)         { /* v18g：引擎换行符 0x7C 保持原样（渲染器识别为换行）——v16o 的 →0x0A 是错误转换（渲染器不识别 0x0A → @，简报 @@ 根因！x64dbg 实证：源 0x0F7CFA26 = 7C00 7C00 正常，渲染缓冲被转成 0A00 0A00）*/ }
             else if (w >= 0x21 && w <= 0x7E) { out[i] = (WORD)(w + 0xFEE0); fixed++; }  // 半角 → 全角
             else if (w == 0x20)         { out[i] = 0x3000;             fixed++; }  // 半角空格 → 全角
             i++;
