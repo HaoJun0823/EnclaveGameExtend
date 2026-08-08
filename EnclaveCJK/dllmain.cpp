@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16n"
+#define CJK_VERSION "v16o"
 
 #include "pch.h"
 
@@ -608,6 +608,7 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
                 continue;
             }
             if (w == 0x2E)              { out[i] = 0x3002;             fixed++; }  // v16n：半角点→全角句号（0xFF0E 字库无字形→@，0x3002 确定有）
+            else if (w == 0x7C)         { out[i] = 0x000A;             fixed++; }  // v16o：|(引擎换行符)→0x0A 换行（渲染器不渲染 0x0A）
             else if (w >= 0x21 && w <= 0x7E) { out[i] = (WORD)(w + 0xFEE0); fixed++; }  // 半角 → 全角
             else if (w == 0x20)         { out[i] = 0x3000;             fixed++; }  // 半角空格 → 全角
             i++;
@@ -1547,22 +1548,28 @@ static BOOL g_hookedDrawLen = FALSE;
 // head[] = 绘制现场缓冲的头 10 字节。这是判定「是否还存在第 5 个截断点」的关键证据：
 //   期望看到 A7 5A 32 32 开头（窄前缀 §Z22），紧跟正文的 UTF-16 码元。
 // v16n：改为记录 data 前 64 字节（窄字节），区间外绘制（教程/UI）也可见
+// v16o：纯 ASCII（资源名/路径如 "Main\Default"）不写日志 —— 否则刷爆配额，
+//       只保留含 >0x7F 字节（UTF-16 中文/§Z22 前缀）的绘制文本
 static void h5_diag(DWORD retRva, int found, int slen, const BYTE* data)
 {
     static volatile LONG s_c = 0;
     char buf[340];
     char* p;
-    int i;
-    if (InterlockedIncrement(&s_c) > 100) return;
+    int i, hasHi = 0;
+    if (InterlockedIncrement(&s_c) > 400) return;
     p = buf;
     p += wsprintfA(p, "[H5] ret=%05X len=%3d strlen=%3d %-7s | ", retRva, found, slen,
                    found > 0 ? "RESCUED" : "miss");
     __try
     {
         for (i = 0; i < 64 && data[i]; i++)
+        {
+            if (data[i] > 0x7F) hasHi = 1;
             p += wsprintfA(p, "%02X ", data[i]);
+        }
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { }
+    if (!hasHi) return;
     p += wsprintfA(p, "\r\n");
     diag_write(buf);
 }
