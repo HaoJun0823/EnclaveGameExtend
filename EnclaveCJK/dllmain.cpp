@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16q"
+#define CJK_VERSION "v16r"
 
 #include "pch.h"
 
@@ -848,14 +848,19 @@ static BYTE  g_origLocWideBody[WIDE_HDR_BYTES];
 static void* g_wideTramp = NULL;
 static DWORD g_msBase = 0;
 static BOOL  g_hookedWideBody = FALSE;
+static DWORD g_wideOrigRet = 0;   // ★ v16r：hook_impl 保存的原调用者返回地址
 
 static void __cdecl cjk_loc_wide_post_c(const WORD* a1, WORD* out, int cap)
 {
+    // ★ v16r：caller 用 hook_impl 保存的 g_wideOrigRet（_ReturnAddress() 是 post 内地址，无意义）
     safe_fullwidth_expanded((DWORD)out,
-                            (DWORD)_ReturnAddress() - g_msBase, cap);
+                            g_wideOrigRet - g_msBase, cap);
 }
 
 // 原函数 ret 后被改到的 post（独立 naked 函数，避免编译器 C1001）
+// ★ v16r：post 是被原函数 ret 跳入的，进入时栈顶是参数 a1 而非返回地址，
+//   结尾必须 jmp 回保存的原调用者（参数留给 __cdecl 调用者清理）——
+//   之前用 ret 会弹出 a1 当返回地址 → 跳到垃圾地址 → 崩溃（v16q 实测）。
 static void __declspec(naked) cjk_loc_wide_post(void)
 {
     __asm
@@ -870,7 +875,7 @@ static void __declspec(naked) cjk_loc_wide_post(void)
         call cjk_loc_wide_post_c
         add  esp, 12
         popad
-        ret                                      ; 返回原调用者（cdecl，调用者清栈）
+        jmp  dword ptr [g_wideOrigRet]           ; 回原调用者（栈上参数保留，调用者清栈）
     }
 }
 static DWORD cjk_loc_wide_post_addr = (DWORD)cjk_loc_wide_post;
@@ -885,6 +890,7 @@ static void __declspec(naked) cjk_loc_wide_hook_impl(void)
         push eax
         mov  ecx, cjk_loc_wide_post_addr         ; post 地址
         mov  eax, [ebp + 4]                      ; 原返回地址
+        mov  g_wideOrigRet, eax                  ; ★ v16r：保存 → post 用 jmp 回来
         mov  [ebp + 4], ecx                      ; 替换 → 原函数 ret 后先到 post
         pop  eax
         pop  ebp
@@ -1141,7 +1147,7 @@ static void __declspec(naked) cjk_findkey_post(void)
         call cjk_findkey_post_c
         add  esp, 8
         popad
-        ret                                      ; 返回原调用者（cdecl，调用者清栈）
+        jmp  dword ptr [g_keyCaller]             ; ★ v16r：jmp 回原调用者（参数留给调用者清）
     }
 }
 static DWORD cjk_findkey_post_addr = (DWORD)cjk_findkey_post;
