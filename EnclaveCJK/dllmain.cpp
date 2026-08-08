@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16l"
+#define CJK_VERSION "v16m"
 
 #include "pch.h"
 
@@ -594,9 +594,17 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
             if (w == 0x00A7)                    // § 控制码 → 原样跳过（§Z22 / §C… 字号颜色）
             {
                 i++;
-                if (i >= limit || out[i] == 0) break;
-                i++;                                                        // 码字母（Z/C/…）
-                while (i < limit && out[i] >= 0x30 && out[i] <= 0x39) i++;  // 数字参数
+                if (i >= limit || out[i] == 0) { out[i - 1] = 0x3000; break; }
+                WORD code = out[i];
+                // v16m：码字母必须是字母/数字才当控制码；§ 后跟非字母（如「正在加载§.」
+                //   的省略号控制）→ § 转全角空格（0x00A7 无字形会渲染 @），后续字符正常处理
+                if ((code >= 'A' && code <= 'Z') || (code >= 'a' && code <= 'z') || (code >= '0' && code <= '9'))
+                {
+                    i++;                                                        // 码字母（Z/C/…）
+                    while (i < limit && out[i] >= 0x30 && out[i] <= 0x39) i++;  // 数字参数
+                    continue;
+                }
+                out[i - 1] = 0x3000;
                 continue;
             }
             if (w >= 0x21 && w <= 0x7E) { out[i] = (WORD)(w + 0xFEE0); fixed++; }  // 半角 → 全角
@@ -609,7 +617,7 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
         //   0x20FB2 是 GameWorld 9 个 Localize_Str(CStr) 调用点之一，其上游还有
         //   021942 / 021E9B / 03319F / 0334CF / 05E3AF / 05E6DF / 0E3D37 / 0E3E37。
         //   若教程提示不走本点，这份日志会是空的 —— 那就直接锁定"要改 hook 点"。
-        if (hasAscii && (hasNl || post_quota(callerRva, 0)))
+        if ((hasAscii || hasCjk) && (hasNl || post_quota(callerRva, 0)))
         {
             char buf[1152];
             char* p = buf;
@@ -673,6 +681,10 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
 #define IAT_EXE_CSTR_RVA   0x7744Cu   // Enclave.exe ?Localize_Str@@YAXVCStr@@PAGH@Z
 #define IAT_EXE_NARROW_RVA 0x77458u   // Enclave.exe ?Localize_Str@@YAXPBDPAGH@Z
 #define IAT_EXE_WIDE_RVA   0x7745Cu   // Enclave.exe ?Localize_Str@@YAXPBGPAGH@Z
+// v16m：渲染最终出口 GDI TextOutW —— 教程文本（不经 Localize_Str 槽，直接渲染路径）
+//       的唯一观察点。GW 0x13E020 / EXE 0x7705C（导入表精确解析）
+#define IAT_GW_TEXTOUTW_RVA  0x13E020u  // GameWorld  GDI32.TextOutW
+#define IAT_EXE_TEXTOUTW_RVA 0x7705Cu   // Enclave.exe GDI32.TextOutW
 
 typedef struct { DWORD lo, hi; } CStrVal;      // CStr 按值 = 8 字节
 
@@ -757,6 +769,57 @@ static void __declspec(noinline) __cdecl my_LocExeWide(const WORD* src, WORD* ou
     InterlockedIncrement((volatile LONG*)&g_postHits);
     safe_fullwidth_expanded((DWORD)out,
                             (DWORD)_ReturnAddress() - g_exeBase, cap);
+}
+
+// ★ v16m：渲染最终出口 GDI TextOutW —— 教程文本（不经 Localize_Str 槽，直接渲染）
+//       的唯一观察点。记录含中文的绘制文本（strong 判据，前 200 条）→ CJK_draw_log.txt
+typedef int (__stdcall *pfn_TextOutW)(void* hdc, int x, int y, const WORD* lp, int c);
+static pfn_TextOutW g_origTextOutW = NULL;
+
+static void draw_log(const WORD* w, int c)
+{
+    static volatile LONG s_draw = 0;
+    LONG n = InterlockedIncrement(&s_draw);
+    int strong = 0, i;
+    char buf[1600];
+    char* p;
+    HANDLE h;
+    DWORD wn;
+    if (n > 200) return;
+    if (!w || c <= 0 || c > 512) return;
+    __try
+    {
+        for (i = 0; i < c && i < 256; i++)
+        {
+            BYTE lo = (BYTE)w[i];
+            if (lo < 0x20 || lo > 0x7E) strong++;
+        }
+        if (strong < 2) return;                       // 纯 ASCII 绘制 → 跳过（噪声）
+        p = buf;
+        p += wsprintfA(p, "[DRAW %ld] c=%d strong=%d\n", n, c, strong);
+        for (i = 0; i < c && i < 256; i++)
+            p += wsprintfA(p, "%04X ", (unsigned)w[i]);
+        p += wsprintfA(p, "\n");
+        h = CreateFileA("CJK_draw_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE)
+        {
+            SetFilePointer(h, 0, NULL, FILE_END);
+            WriteFile(h, buf, (DWORD)(p - buf), &wn, NULL);
+            CloseHandle(h);
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+static int __stdcall my_TextOutW(void* hdc, int x, int y, const WORD* lp, int c)
+{
+    if (g_origTextOutW)
+    {
+        draw_log(lp, c);
+        return g_origTextOutW(hdc, x, y, lp, c);
+    }
+    return 0;
 }
 
 // 改写一个 IAT 槽：校验通过才写。返回 1 = 成功
@@ -1601,6 +1664,24 @@ static BOOL install_hook(void)
                 else
                 {
                     log_msg("[CJK] GetModuleHandle(NULL) 失败，EXE IAT 跳过\n");
+                }
+            }
+
+            // ★ v16m：渲染最终出口 GDI TextOutW —— 教程文本的唯一观察点（直接渲染路径）
+            {
+                HMODULE hGdi = GetModuleHandleA("GDI32.dll");
+                FARPROC pTW = hGdi ? GetProcAddress(hGdi, "TextOutW") : NULL;
+                if (pTW)
+                {
+                    g_iatCount += iat_hook_one(g_gwBase, IAT_GW_TEXTOUTW_RVA, pTW,
+                                               (void*)my_TextOutW, (void**)&g_origTextOutW, "GW/TextOutW");
+                    if (g_exeBase)
+                        g_iatCount += iat_hook_one(g_exeBase, IAT_EXE_TEXTOUTW_RVA, pTW,
+                                                   (void*)my_TextOutW, (void**)&g_origTextOutW, "EXE/TextOutW");
+                }
+                else
+                {
+                    log_msg("[CJK] GDI32 TextOutW 未解析，渲染诊断跳过\n");
                 }
             }
 
