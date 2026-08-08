@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16z"
+#define CJK_VERSION "v17a"
 
 #include "pch.h"
 
@@ -1288,36 +1288,33 @@ static BYTE  g_origKeyNameBody[KEYNAME_HDR_BYTES];
 static void* g_keyNameTramp = NULL;
 static BOOL  g_hookedKeyName = FALSE;
 static DWORD g_keyNameOrigRet = 0;
+static DWORD g_mccBase = 0;
 
-// post：eax = ret_ptr（CStr*）→ data_ptr = [ret_ptr+4] → 键名全角化/汉字映射 + 日志
+// ★ v17a：post 改【只读诊断】——v16z 崩溃根因：GetKeyName 返回的 CStr 走浅拷贝，
+//   data_ptr 直接指向 MXR 内部共享缓冲（caller=0x46F67BE=MXR RVA 0x367BE），
+//   v16y/v16z 对 data[1..255] 全角化【写入】→ 越界破坏 MXR 内部数据 →
+//   MXR 0x6af6（CStr 哈希 mov [edx],ax）用被破坏指针 → 崩（两次 dmp 同点实锤）。
+//   ⇒ 本 post 零写入：只记录返回 CStr 的真实数据（确认它到底是不是教程键名源）。
 static void __cdecl cjk_keyname_post_c(DWORD retPtr)
 {
     static volatile LONG s_n = 0;
     char sb[700], *p;
     WORD* data;
     LONG n;
-    int i, fixed;
+    int i;
     if (!retPtr) return;
     __try
     {
         data = *(WORD**)(retPtr + 4);
         if (!data || data == (WORD*)-2) return;
-        // 数据 = [标志 WORD(bit15 宽)][UTF-16 正文] → 正文从 data+1 起（与 FindKeyValue 同布局）
-        fixed = 0;
-        for (i = 1; i < 256 && data[i]; i++)
-        {
-            WORD c = data[i];
-            if (c >= 0x21 && c <= 0x7E) { data[i] = (WORD)(c + 0xFEE0); fixed++; }  // 半角→全角（字库 A3 区有字形）
-            else if (c == 0x20)          { data[i] = 0x3000;            fixed++; }  // 空格→全角空格
-        }
-        // 日志（前 200 条）
+        // 只读：前 16 WORD 快照（上限收紧，防越界读）
         n = InterlockedIncrement(&s_n);
         if (n <= 200)
         {
             p = sb;
-            p += wsprintfA(p, "[KEYNAME %ld] caller=%08X ret=%08X fixed=%d | ", n,
-                           g_keyNameOrigRet - 0x10000000, retPtr, fixed);
-            for (i = 0; i < 20; i++)
+            p += wsprintfA(p, "[KEYNAME %ld] caller=%08X ret=%08X | ", n,
+                           g_keyNameOrigRet - g_mccBase, retPtr);
+            for (i = 0; i < 16; i++)
                 p += wsprintfA(p, "%04X ", (unsigned)data[i]);
             p += wsprintfA(p, "\n");
             {
@@ -1382,6 +1379,7 @@ static int install_keyname_hook(void)
     if (g_hookedKeyName) return 1;
     hMc = GetModuleHandleA("MCCdyn.dll");
     if (!hMc) return 0;
+    g_mccBase = (DWORD)hMc;
     entry = (BYTE*)hMc + MCC_KEYNAME_RVA;
     memcpy(g_origKeyNameBody, entry, KEYNAME_HDR_BYTES);
     for (i = 0; i < KEYNAME_HDR_BYTES; i++)
