@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16j"
+#define CJK_VERSION "v16k"
 
 #include "pch.h"
 
@@ -664,6 +664,12 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
 #define IAT_GW_NARROW_RVA  0x13E534u   // GameWorld  ?Localize_Str@@YAXPBDPAGH@Z
 #define IAT_GW_WIDE_RVA    0x13E530u   // GameWorld  ?Localize_Str@@YAXPBGPAGH@Z
 #define IAT_GC_NARROW_RVA  0x1A72E4u   // GameClasses ?Localize_Str@@YAXPBDPAGH@Z
+// v16k：Enclave.exe（主程序）也导入全部 3 个变体（教程 HUD 直接调 Localize_Str，
+//       走 EXE 自己的 IAT → 之前从未 hook → 键名永不全角化 → "按@@@@@…"）。
+//       实测导入表：IAT_RVA 0x773B0 = CStr / 0x773B4 = narrow / 0x773B8 = wide
+#define IAT_EXE_CSTR_RVA   0x773B0u   // Enclave.exe ?Localize_Str@@YAXVCStr@@PAGH@Z
+#define IAT_EXE_NARROW_RVA 0x773B4u   // Enclave.exe ?Localize_Str@@YAXPBDPAGH@Z
+#define IAT_EXE_WIDE_RVA   0x773B8u   // Enclave.exe ?Localize_Str@@YAXPBGPAGH@Z
 
 typedef struct { DWORD lo, hi; } CStrVal;      // CStr 按值 = 8 字节
 
@@ -715,6 +721,39 @@ static void __declspec(noinline) __cdecl my_LocGcNarrow(const char* src, WORD* o
     // 最高位置 1 标记「来自 GameClasses」，与 GameWorld 的 RVA 一眼可分
     safe_fullwidth_expanded((DWORD)out,
                             0x80000000u | ((DWORD)_ReturnAddress() - g_gcBase), cap);
+}
+
+// ★ v16k：Enclave.exe（主程序）的 3 个变体转发函数 —— callerRVA 以 g_exeBase 计算
+static DWORD g_exeBase = 0;                      // Enclave.exe 基址（GetModuleHandle(NULL)）
+static pfn_LocCStr   g_origExeLocCStr   = NULL;
+static pfn_LocNarrow g_origExeLocNarrow = NULL;
+static pfn_LocWide   g_origExeLocWide   = NULL;
+
+static void __declspec(noinline) __cdecl my_LocExeCStr(CStrVal src, WORD* out, int cap)
+{
+    if (!g_origExeLocCStr) return;
+    g_origExeLocCStr(src, out, cap);
+    InterlockedIncrement((volatile LONG*)&g_postHits);
+    safe_fullwidth_expanded((DWORD)out,
+                            (DWORD)_ReturnAddress() - g_exeBase, cap);
+}
+
+static void __declspec(noinline) __cdecl my_LocExeNarrow(const char* src, WORD* out, int cap)
+{
+    if (!g_origExeLocNarrow) return;
+    g_origExeLocNarrow(src, out, cap);
+    InterlockedIncrement((volatile LONG*)&g_postHits);
+    safe_fullwidth_expanded((DWORD)out,
+                            (DWORD)_ReturnAddress() - g_exeBase, cap);
+}
+
+static void __declspec(noinline) __cdecl my_LocExeWide(const WORD* src, WORD* out, int cap)
+{
+    if (!g_origExeLocWide) return;
+    g_origExeLocWide(src, out, cap);
+    InterlockedIncrement((volatile LONG*)&g_postHits);
+    safe_fullwidth_expanded((DWORD)out,
+                            (DWORD)_ReturnAddress() - g_exeBase, cap);
 }
 
 // 改写一个 IAT 槽：校验通过才写。返回 1 = 成功
@@ -1541,6 +1580,26 @@ static BOOL install_hook(void)
                                        (void*)my_LocNarrow, (void**)&g_origLocNarrow, "GW/narrow");
             g_iatCount += iat_hook_one(g_gwBase, IAT_GW_WIDE_RVA,   pW,
                                        (void*)my_LocWide,   (void**)&g_origLocWide,   "GW/wide");
+
+            // ★ v16k：Enclave.exe（主程序）同样导入 3 个变体 —— 教程 HUD 走这里！
+            //   实测导入表 IAT_RVA 0x773B0(CStr)/0x773B4(narrow)/0x773B8(wide)
+            {
+                HMODULE hExe = GetModuleHandleA(NULL);
+                if (hExe)
+                {
+                    g_exeBase = (DWORD)hExe;
+                    g_iatCount += iat_hook_one(g_exeBase, IAT_EXE_CSTR_RVA,   pC,
+                                               (void*)my_LocExeCStr,   (void**)&g_origExeLocCStr,   "EXE/CStr");
+                    g_iatCount += iat_hook_one(g_exeBase, IAT_EXE_NARROW_RVA, pN,
+                                               (void*)my_LocExeNarrow, (void**)&g_origExeLocNarrow, "EXE/narrow");
+                    g_iatCount += iat_hook_one(g_exeBase, IAT_EXE_WIDE_RVA,   pW,
+                                               (void*)my_LocExeWide,   (void**)&g_origExeLocWide,   "EXE/wide");
+                }
+                else
+                {
+                    log_msg("[CJK] GetModuleHandle(NULL) 失败，EXE IAT 跳过\n");
+                }
+            }
 
             hGc = GetModuleHandleA("GameClasses.dll");
             if (hGc)
