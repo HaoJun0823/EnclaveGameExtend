@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16p"
+#define CJK_VERSION "v16q"
 
 #include "pch.h"
 
@@ -839,8 +839,12 @@ static int __stdcall my_TextOutW(void* hdc, int x, int y, const WORD* lp, int c)
 //   wide 返回后 out（a2）= 最终文本（v16o [POST]「正在加载」实证）。
 //   hook 本体 = 无论调用者走 IAT/直接 call/GetProcAddress，全角化都生效
 //   —— 教程（走返回值变体绕过所有 IAT 槽）也被覆盖。
-#define MS_LOCALIZE_WIDE_RVA 0xAD10u
-static BYTE  g_origLocWideBody[5];
+// ★ v16q 修正：真实导出 RVA = 0x10AD10（.text 从 RVA 0x1000 起，函数在 0x10AD10）！
+//   v16p 误用 0xAD10 → patch 到 0x1000AD10（错误地址）→ hook 从未生效 → 实测「毫无变化」。
+//   v16q 再修正：函数头 = sub esp,0x800（6 字节指令），trampoline 必须复制完整 6 字节。
+#define MS_LOCALIZE_WIDE_RVA 0x10AD10u
+#define WIDE_HDR_BYTES 6
+static BYTE  g_origLocWideBody[WIDE_HDR_BYTES];
 static void* g_wideTramp = NULL;
 static DWORD g_msBase = 0;
 static BOOL  g_hookedWideBody = FALSE;
@@ -892,24 +896,313 @@ static int install_wide_body_hook(void)
 {
     BYTE* entry;
     DWORD oldProt;
+    int i;
+    // 期望函数头：sub esp,0x800（81 EC 00 08 00 00）
+    static const BYTE expect[WIDE_HDR_BYTES] = {0x81, 0xEC, 0x00, 0x08, 0x00, 0x00};
     if (g_hookedWideBody) return 1;
     g_msBase = (DWORD)GetModuleHandleA("MSystem.dll");
     if (!g_msBase) return 0;
     entry = (BYTE*)(g_msBase + MS_LOCALIZE_WIDE_RVA);
-    memcpy(g_origLocWideBody, entry, 5);
+    memcpy(g_origLocWideBody, entry, WIDE_HDR_BYTES);
+    for (i = 0; i < WIDE_HDR_BYTES; i++)
+        if (g_origLocWideBody[i] != expect[i])
+        {
+            log_msg("[CJK] wide 落点核验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+                    g_origLocWideBody[0], g_origLocWideBody[1], g_origLocWideBody[2],
+                    g_origLocWideBody[3], g_origLocWideBody[4], g_origLocWideBody[5]);
+            return 0;
+        }
     g_wideTramp = VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!g_wideTramp) return 0;
-    memcpy(g_wideTramp, g_origLocWideBody, 5);
-    ((BYTE*)g_wideTramp)[5] = 0xE9;
-    *(DWORD*)((BYTE*)g_wideTramp + 6) = ((DWORD)entry + 5) - ((DWORD)g_wideTramp + 10);
-    if (!VirtualProtect(entry, 5, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    memcpy(g_wideTramp, g_origLocWideBody, WIDE_HDR_BYTES);
+    ((BYTE*)g_wideTramp)[WIDE_HDR_BYTES] = 0xE9;
+    *(DWORD*)((BYTE*)g_wideTramp + WIDE_HDR_BYTES + 1) =
+        ((DWORD)entry + WIDE_HDR_BYTES) - ((DWORD)g_wideTramp + WIDE_HDR_BYTES + 5);
+    if (!VirtualProtect(entry, WIDE_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
     entry[0] = 0xE9;
     *(DWORD*)(entry + 1) = (DWORD)cjk_loc_wide_hook_impl - ((DWORD)entry + 5);
-    VirtualProtect(entry, 5, oldProt, &oldProt);
-    FlushInstructionCache(GetCurrentProcess(), entry, 5);
+    entry[5] = 0x90;   // 第 6 字节（原 sub esp 的第 6 字节）→ nop
+    VirtualProtect(entry, WIDE_HDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, WIDE_HDR_BYTES);
     g_hookedWideBody = TRUE;
-    log_msg("[CJK] v16p Localize_Str(wide) 本体 hook：%08X -> %08X（终极统一）\n",
+    log_msg("[CJK] v16q Localize_Str(wide) 本体 hook：%08X -> %08X（终极统一，6B trampoline）\n",
             (DWORD)entry, (DWORD)cjk_loc_wide_hook_impl);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v16q：hook Localize_FindKeyValue（MSystem 导出 RVA 0x10A6A0，VA 0x1010A6A0）
+//   —— §L 键名查表点！教程 HUD「按§LTUTORIAL_PRIMARY取出武器」由渲染器调它查
+//   STRINGTABLES\DYNAMIC，展开产物 = 半角 ASCII 键名（注册值 = "'键名'"）→
+//   字库无半角/全角字母字形 → 渲染 @。
+//   在函数本体 post 里：日志（caller/key/数据）+ 键名→汉字映射（字库确定有汉字字形）。
+//   ★ 与 wide 本体 hook 的关系：FindKeyValue 在 Localize_Str 内部也被调用（§L 展开），
+//     但教程渲染路径绕过 Localize_Str 直接调 FindKeyValue —— 这里是教程键名的唯一通路。
+// ═══════════════════════════════════════════════════════════════════════
+#define MS_FINDKEY_RVA 0x10A6A0u
+#define FINDKEY_HDR_BYTES 7
+static BYTE  g_origFindKeyBody[FINDKEY_HDR_BYTES];
+static void* g_findKeyTramp = NULL;
+static BOOL  g_hookedFindKey = FALSE;
+static DWORD g_keyCaller = 0;              // hook_impl 保存的原调用者返回地址
+
+// 大小写不敏感 ASCII 比较（免 string.h 依赖）
+static int key_eq(const char* a, const char* b)
+{
+    while (*a && *b)
+    {
+        char ca = *a, cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca += 32;
+        if (cb >= 'A' && cb <= 'Z') cb += 32;
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+// 键名 → 汉字映射表（UTF-16 码位数组，规避源文件编码问题）
+// 全部用字库确定有的汉字（cfg 字符集实证）
+static const WORD W_MOUSE_LEFT[]  = {0x9F20,0x6807,0x5DE6,0x952E,0};   // 鼠标左键
+static const WORD W_MOUSE_RIGHT[] = {0x9F20,0x6807,0x53F3,0x952E,0};   // 鼠标右键
+static const WORD W_SPACE[]       = {0x7A7A,0x683C,0x952E,0};          // 空格键
+static const WORD W_SHIFT[]       = {0x4E0A,0x6863,0x952E,0};          // 上档键
+static const WORD W_CTRL[]        = {0x63A7,0x5236,0x952E,0};          // 控制键
+static const WORD W_ALT[]         = {0x66FF,0x6362,0x952E,0};          // 替换键
+static const WORD W_TAB[]         = {0x8DF3,0x683C,0x952E,0};          // 跳格键
+static const WORD W_ENTER[]       = {0x56DE,0x8F66,0x952E,0};          // 回车键
+static const WORD W_ESC[]         = {0x9000,0x51FA,0x952E,0};          // 退出键
+static const WORD W_BACKSPACE[]   = {0x9000,0x683C,0x952E,0};          // 退格键
+static const WORD W_DELETE[]      = {0x5220,0x9664,0x952E,0};          // 删除键
+static const WORD W_INSERT[]      = {0x63D2,0x5165,0x952E,0};          // 插入键
+static const WORD W_HOME[]        = {0x8D77,0x59CB,0x952E,0};          // 起始键
+static const WORD W_END[]         = {0x7ED3,0x675F,0x952E,0};          // 结束键
+static const WORD W_PGUP[]        = {0x4E0A,0x7FFB,0x9875,0};          // 上翻页
+static const WORD W_PGDN[]        = {0x4E0B,0x7FFB,0x9875,0};          // 下翻页
+static const WORD W_UP[]          = {0x4E0A,0x7BAD,0x5934,0};          // 上箭头
+static const WORD W_DOWN[]        = {0x4E0B,0x7BAD,0x5934,0};          // 下箭头
+static const WORD W_LEFT[]        = {0x5DE6,0x7BAD,0x5934,0};          // 左箭头
+static const WORD W_RIGHT[]       = {0x53F3,0x7BAD,0x5934,0};          // 右箭头
+static const WORD W_MMOVE[]       = {0x9F20,0x6807,0x79FB,0x52A8,0};   // 鼠标移动
+// 单字母键 → 动作名（教程默认绑定；字库无字母字形，映射汉字保证可读）
+static const WORD W_KEY_W[]       = {0x524D,0x8FDB,0x952E,0};          // 前进键
+static const WORD W_KEY_A[]       = {0x5DE6,0x79FB,0x952E,0};          // 左移键
+static const WORD W_KEY_S[]       = {0x540E,0x9000,0x952E,0};          // 后退键
+static const WORD W_KEY_D[]       = {0x53F3,0x79FB,0x952E,0};          // 右移键
+static const WORD W_KEY_Q[]       = {0x5207,0x6362,0x6B66,0x5668,0x952E,0};  // 切换武器键
+static const WORD W_KEY_E[]       = {0x5207,0x6362,0x7269,0x54C1,0x952E,0};  // 切换物品键
+static const WORD W_KEY_C[]       = {0x8E72,0x4E0B,0x952E,0};          // 蹲下键
+static const WORD W_KEY_F[]       = {0x559D,0x836F,0x6C34,0x952E,0};   // 喝药水键
+static const WORD W_KEY_J[]       = {0x83DC,0x5355,0x952E,0};          // 菜单键
+static const WORD W_KEY_G[]       = {0x5207,0x6362,0x89C6,0x89D2,0x952E,0};  // 切换视角键
+
+typedef struct { const char* name; const WORD* repl; } KeyMapEntry;
+static const KeyMapEntry KEY_MAP[] = {
+    {"MOUSE1", W_MOUSE_LEFT}, {"MOUSEBTN1", W_MOUSE_LEFT}, {"MOUSE_LEFT", W_MOUSE_LEFT}, {"LMOUSE", W_MOUSE_LEFT},
+    {"MOUSE2", W_MOUSE_RIGHT}, {"MOUSEBTN2", W_MOUSE_RIGHT}, {"MOUSE_RIGHT", W_MOUSE_RIGHT}, {"RMOUSE", W_MOUSE_RIGHT},
+    {"SPACE", W_SPACE}, {"SPACEBAR", W_SPACE},
+    {"SHIFT", W_SHIFT}, {"LSHIFT", W_SHIFT}, {"RSHIFT", W_SHIFT},
+    {"CTRL", W_CTRL}, {"CONTROL", W_CTRL}, {"LCONTROL", W_CTRL}, {"RCONTROL", W_CTRL},
+    {"ALT", W_ALT}, {"LMENU", W_ALT}, {"RMENU", W_ALT},
+    {"TAB", W_TAB},
+    {"ENTER", W_ENTER}, {"RETURN", W_ENTER}, {"KP_ENTER", W_ENTER},
+    {"ESC", W_ESC}, {"ESCAPE", W_ESC},
+    {"BACKSPACE", W_BACKSPACE}, {"BACK", W_BACKSPACE},
+    {"DELETE", W_DELETE}, {"DEL", W_DELETE},
+    {"INSERT", W_INSERT}, {"INS", W_INSERT},
+    {"HOME", W_HOME}, {"END", W_END},
+    {"PAGEUP", W_PGUP}, {"PGUP", W_PGUP}, {"PAGEDOWN", W_PGDN}, {"PGDN", W_PGDN},
+    {"UP", W_UP}, {"UPARROW", W_UP}, {"DOWN", W_DOWN}, {"DOWNARROW", W_DOWN},
+    {"LEFT", W_LEFT}, {"LEFTARROW", W_LEFT}, {"RIGHT", W_RIGHT}, {"RIGHTARROW", W_RIGHT},
+    {"MOUSEMOVE", W_MMOVE},
+    {"W", W_KEY_W}, {"A", W_KEY_A}, {"S", W_KEY_S}, {"D", W_KEY_D},
+    {"Q", W_KEY_Q}, {"E", W_KEY_E}, {"C", W_KEY_C}, {"F", W_KEY_F},
+    {"J", W_KEY_J}, {"G", W_KEY_G},
+};
+
+// 查映射：tok 为 ASCII 字母数字串（≤38），命中返回替换串（WORD*），否则 NULL
+static const WORD* key_map_lookup(const char* tok)
+{
+    int i;
+    for (i = 0; i < (int)(sizeof(KEY_MAP) / sizeof(KEY_MAP[0])); i++)
+    {
+        if (key_eq(KEY_MAP[i].name, tok))
+            return KEY_MAP[i].repl;
+    }
+    return NULL;
+}
+
+// 在 UTF-16 文本 t 中替换键名：识别 [引号]字母数字串[引号]，命中映射则替换为汉字并剥离引号。
+// 变长处理：memmove 后续文本（含终止符）。边界：maxw WORD。
+static void key_replace(WORD* t, int maxw)
+{
+    int i = 0;
+    while (i < maxw && t[i])
+    {
+        WORD c = t[i];
+        if ((c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A))
+        {
+            int strip_lead = (i > 0 && t[i - 1] == 0x27) ? 1 : 0;
+            int j = i, tl = 0;
+            char tok[40];
+            while (j < maxw && t[j] &&
+                   ((t[j] >= 0x30 && t[j] <= 0x39) || (t[j] >= 0x41 && t[j] <= 0x5A) ||
+                    (t[j] >= 0x61 && t[j] <= 0x7A)) && tl < 38)
+            {
+                tok[tl++] = (char)t[j];
+                j++;
+            }
+            tok[tl] = 0;
+            int strip_trail = (j < maxw && t[j] == 0x27) ? 1 : 0;
+            const WORD* repl = key_map_lookup(tok);
+            if (repl)
+            {
+                int rlen = 0, newstart, oldend, delta, total, k;
+                while (repl[rlen]) rlen++;
+                newstart = i - strip_lead;
+                oldend = j + strip_trail;
+                total = 0;
+                while (t[total]) total++;
+                delta = oldend - newstart;
+                if (rlen != delta && oldend <= total)
+                {
+                    memmove(t + newstart + rlen, t + oldend,
+                            (total + 1 - oldend) * sizeof(WORD));
+                }
+                for (k = 0; k < rlen; k++) t[newstart + k] = repl[k];
+                i = newstart + rlen;
+                continue;
+            }
+            i = j;
+        }
+        else
+        {
+            i++;
+        }
+    }
+}
+
+// post：原函数 ret 后被跳入。栈 [a1, a2]（__cdecl，调用者未清栈）。
+static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
+{
+    static volatile LONG s_n = 0;
+    char sb[640], *p;
+    WORD* data;
+    LONG n;
+    int i;
+    if (!a1) return;
+    __try
+    {
+        data = *(WORD**)(a1 + 4);
+        if (!data || data == (WORD*)-2) return;
+        // 键名→汉字映射。数据 = [标志 WORD(bit15 宽)][UTF-16 正文] → 正文从 data+1 起。
+        key_replace(data + 1, 512);
+        // 日志（配额 200）
+        n = InterlockedIncrement(&s_n);
+        if (n <= 200)
+        {
+            p = sb;
+            p += wsprintfA(p, "[KEY %ld] caller=%08X key=", n, g_keyCaller - g_msBase);
+            {
+                const char* k = (const char*)a2;
+                int kl = 0;
+                __try { while (k[kl] && kl < 40) kl++; }
+                __except (EXCEPTION_EXECUTE_HANDLER) { kl = 0; }
+                for (i = 0; i < kl; i++)
+                    p += wsprintfA(p, "%c", (k[i] >= 0x20 && k[i] < 0x7F) ? k[i] : '.');
+            }
+            p += wsprintfA(p, " out=%08X | ", a1);
+            for (i = 0; i < 24; i++)
+                p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+            p += wsprintfA(p, "\n");
+            {
+                HANDLE h = CreateFileA("CJK_key_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                       NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (h != INVALID_HANDLE_VALUE)
+                {
+                    SetFilePointer(h, 0, NULL, FILE_END);
+                    DWORD wn; WriteFile(h, sb, (DWORD)(p - sb), &wn, NULL);
+                    CloseHandle(h);
+                }
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+static void __declspec(naked) cjk_findkey_post(void)
+{
+    __asm
+    {
+        pushad
+        mov  eax, [esp + 0x20]                   ; a1
+        mov  ecx, [esp + 0x24]                   ; a2
+        push ecx
+        push eax
+        call cjk_findkey_post_c
+        add  esp, 8
+        popad
+        ret                                      ; 返回原调用者（cdecl，调用者清栈）
+    }
+}
+static DWORD cjk_findkey_post_addr = (DWORD)cjk_findkey_post;
+
+static void __declspec(naked) cjk_findkey_hook_impl(void)
+{
+    __asm
+    {
+        ; 进入：栈 [ret_to_caller, a1, a2]
+        push ebp
+        mov  ebp, esp
+        push eax
+        mov  ecx, cjk_findkey_post_addr          ; post 地址
+        mov  eax, [ebp + 4]                      ; 原返回地址（= 原函数调用者）
+        mov  g_keyCaller, eax                    ; 保存 → post 里算 caller RVA
+        mov  [ebp + 4], ecx                      ; 替换 → 原函数 ret 后先到 post
+        pop  eax
+        pop  ebp
+        jmp  dword ptr [g_findKeyTramp]          ; 跳板：原 5 字节 + jmp 原函数+5
+    }
+}
+
+static int install_findkey_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMs;
+    int i;
+    // 期望函数头：push -1（6A FF）+ push SEHhandler（68 DA 80 11 10）＝7 字节完整两条指令
+    static const BYTE expect[FINDKEY_HDR_BYTES] = {0x6A, 0xFF, 0x68, 0xDA, 0x80, 0x11, 0x10};
+    if (g_hookedFindKey) return 1;
+    hMs = GetModuleHandleA("MSystem.dll");
+    if (!hMs) return 0;
+    g_msBase = (DWORD)hMs;
+    entry = (BYTE*)(g_msBase + MS_FINDKEY_RVA);
+    memcpy(g_origFindKeyBody, entry, FINDKEY_HDR_BYTES);
+    for (i = 0; i < FINDKEY_HDR_BYTES; i++)
+        if (g_origFindKeyBody[i] != expect[i])
+        {
+            log_msg("[CJK] FindKeyValue 落点核验失败：%02X %02X %02X %02X %02X %02X %02X，跳过\n",
+                    g_origFindKeyBody[0], g_origFindKeyBody[1], g_origFindKeyBody[2],
+                    g_origFindKeyBody[3], g_origFindKeyBody[4], g_origFindKeyBody[5],
+                    g_origFindKeyBody[6]);
+            return 0;
+        }
+    g_findKeyTramp = VirtualAlloc(NULL, 20, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_findKeyTramp) return 0;
+    memcpy(g_findKeyTramp, g_origFindKeyBody, FINDKEY_HDR_BYTES);
+    ((BYTE*)g_findKeyTramp)[FINDKEY_HDR_BYTES] = 0xE9;
+    *(DWORD*)((BYTE*)g_findKeyTramp + FINDKEY_HDR_BYTES + 1) =
+        ((DWORD)entry + FINDKEY_HDR_BYTES) - ((DWORD)g_findKeyTramp + FINDKEY_HDR_BYTES + 5);
+    if (!VirtualProtect(entry, FINDKEY_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_findkey_hook_impl - ((DWORD)entry + 5);
+    entry[5] = 0x90;   // 原第 6 字节（push imm32 的第 3 字节）→ nop
+    entry[6] = 0x90;   // 原第 7 字节 → nop
+    VirtualProtect(entry, FINDKEY_HDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, FINDKEY_HDR_BYTES);
+    g_hookedFindKey = TRUE;
+    log_msg("[CJK] v16q FindKeyValue 本体 hook：%08X -> %08X（教程 §L 键名查表点，7B trampoline）\n",
+            (DWORD)entry, (DWORD)cjk_findkey_hook_impl);
     return 1;
 }
 
@@ -1740,6 +2033,8 @@ static BOOL install_hook(void)
         {
             // ★ v16p：hook Localize_Str(wide) 函数本体（终极统一——所有变体最终都调它）
             install_wide_body_hook();
+            // ★ v16q：hook Localize_FindKeyValue 本体（教程 §L 键名查表点 → 键名汉字映射）
+            install_findkey_hook();
 
             FARPROC pC = GetProcAddress(hMs, "?Localize_Str@@YAXVCStr@@PAGH@Z");
             FARPROC pN = GetProcAddress(hMs, "?Localize_Str@@YAXPBDPAGH@Z");
