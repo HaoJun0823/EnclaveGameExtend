@@ -1,0 +1,56 @@
+﻿cjk_tfstr_trampoline_impl@@YAXXZ (void __cdecl cjk_tfstr_trampoline_impl(void)):
+  00000000: mov         eax,dword ptr [esp]
+  00000003: sub         eax,dword ptr [?g_gwBase@@3KA]
+  00000009: cmp         eax,8D000h
+  0000000E: jb          00000037
+  00000010: cmp         eax,8F000h
+  00000015: ja          00000037
+  00000017: mov         ecx,dword ptr [esp+8]
+  0000001B: test        ecx,ecx
+  0000001D: je          00000037
+  0000001F: mov         edx,dword ptr [esp+4]
+  00000023: push        eax
+  00000024: push        ecx
+  00000025: push        edx
+  00000026: call        ?tfstr_wide_build@@YAHPAXPBXK@Z
+  0000002B: add         esp,0Ch
+  0000002E: test        eax,eax
+  00000030: je          00000037
+  00000032: mov         eax,dword ptr [esp+4]
+  00000036: ret
+  00000037: push        0FFFFFFFFh
+  00000039: mov         eax,dword ptr [?g_gwBase@@3KA]
+  0000003E: add         eax,12EAC8h
+  00000043: push        eax
+  00000044: mov         eax,dword ptr [?g_gwBase@@3KA]
+  00000049: add         eax,54F07h
+  0000004E: jmp         eax
+
+?cjk_trampoline_impl@@YAXXZ (void __cdecl cjk_trampoline_impl(void)):
+  00000000: pushad
+  00000001: mov         eax,dword ptr [esp+48A4h]
+  00000008: sub         eax,dword ptr [?g_gwBase@@3KA]
+  0000000E: cmp         eax,8D000h
+  00000013: jb          00000030
+  00000015: cmp         eax,8F000h
+  0000001A: ja          00000030
+  0000001C: mov         edx,dword ptr [esp+24h]
+  00000020: mov         eax,dword ptr [esp+2Ch]
+  00000024: push        eax
+  00000025: push        edx
+  00000026: call        ?safe_process_subtitle_text@@YAXKK@Z
+  0000002B: add         esp,8
+  0000002E: jmp         0000003B
+  00000030: mov         eax,dword ptr [?g_uiHits@@3JC]
+  00000035: inc         eax
+  00000036: mov         dword ptr [?g_uiHits@@3JC],eax
+  0000003B: mov         eax,dword ptr [?g_hits@@3JC]
+  00000040: inc         eax
+  00000041: mov         dword ptr [?g_hits@@3JC],eax
+  00000046: popad
+  00000047: push        dword ptr [?g_retVA@@3KA]
+  0000004D: jmp         dword ptr [?g_thunkVA@@3KA]
+
+?install_hook@@YAHXZ (int __cdecl install_hook(void)):
+  00000000: push        ecx
+  00000001: cmp   

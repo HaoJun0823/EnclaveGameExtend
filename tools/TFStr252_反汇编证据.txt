@@ -1,0 +1,88 @@
+=== RVA 0x54F00 (VA 0x10054F00) file off 0x54F00 ===
+10054F00  6aff                     push -1
+10054F02  68c8ea1210               push 0x1012eac8
+10054F07  64a100000000             mov eax, dword ptr fs:[0]
+10054F0D  50                       push eax
+10054F0E  64892500000000           mov dword ptr fs:[0], esp
+10054F15  81ecfc000000             sub esp, 0xfc
+10054F1B  56                       push esi
+10054F1C  8bb42410010000           mov esi, dword ptr [esp + 0x110]
+10054F23  8bce                     mov ecx, esi
+10054F25  e8a0c90900               call 0x100f18ca
+10054F2A  8b842414010000           mov eax, dword ptr [esp + 0x114]
+10054F31  85c0                     test eax, eax
+10054F33  c784240801000000000000   mov dword ptr [esp + 0x108], 0
+10054F3E  c706fc451410             mov dword ptr [esi], 0x101445fc
+10054F44  7505                     jne 0x10054f4b
+10054F46  884604                   mov byte ptr [esi + 4], al
+10054F49  eb3f                     jmp 0x10054f8a
+10054F4B  8d8c2418010000           lea ecx, [esp + 0x118]
+10054F52  51                       push ecx
+10054F53  50                       push eax
+10054F54  bafc000000               mov edx, 0xfc
+10054F59  8d4c240c                 lea ecx, [esp + 0xc]
+10054F5D  e888de0900               call 0x100f2dea
+10054F62  8d442404                 lea eax, [esp + 4]
+10054F66  803800                   cmp byte ptr [eax], 0
+10054F69  740c                     je 0x10054f77
+10054F6B  40                       inc eax
+10054F6C  8d9424ff000000           lea edx, [esp + 0xff]
+10054F73  3bc2                     cmp eax, edx
+10054F75  72ef                     jb 0x10054f66
+10054F77  8d4c2404                 lea ecx, [esp + 4]
+10054F7B  2bc1                     sub eax, ecx
+10054F7D  50                       push eax
+10054F7E  8d542408                 lea edx, [esp + 8]
+10054F82  52                       push edx
+10054F83  8bce                     mov ecx, esi
+10054F85  e8f0c80900               call 0x100f187a
+10054F8A  8b8c2400010000           mov ecx, dword ptr [esp + 0x100]
+10054F91  8bc6                     mov eax, esi
+10054F93  5e                       pop esi
+10054F94  64890d00000000           mov dword ptr fs:[0], ecx
+10054F9B  81c408010000             add esp, 0x108
+10054FA1  c3                       ret 
+
+=== RVA 0xF18CA (VA 0x100F18CA) file off 0xF18CA ===
+100F18CA  8bc1                     mov eax, ecx
+100F18CC  c700dc961410             mov dword ptr [eax], 0x101496dc
+100F18D2  c3                       ret 
+100F18D3  90                       nop 
+100F18D4  90                       nop 
+100F18D5  90                       nop 
+
+=== RVA 0xF187A (VA 0x100F187A) file off 0xF187A ===
+100F187A  53                       push ebx
+100F187B  55                       push ebp
+100F187C  56                       push esi
+100F187D  8bd9                     mov ebx, ecx
+100F187F  8b03                     mov eax, dword ptr [ebx]
+100F1881  57                       push edi
+100F1882  ff5078                   call dword ptr [eax + 0x78]
+100F1885  8b6c2418                 mov ebp, dword ptr [esp + 0x18]
+100F1889  48                       dec eax
+100F188A  3bc5                     cmp eax, ebp
+100F188C  7d02                     jge 0x100f1890
+100F188E  8be8                     mov ebp, eax
+100F1890  8b13                     mov edx, dword ptr [ebx]
+100F1892  8b742414                 mov esi, dword ptr [esp + 0x14]
+100F1896  8bcb                     mov ecx, ebx
+100F1898  ff5224                   call dword ptr [edx + 0x24]
+100F189B  8bf8                     mov edi, eax
+100F189D  8bcd                     mov ecx, ebp
+100F189F  8bc1                     mov eax, ecx
+100F18A1  c1e902                   shr ecx, 2
+100F18A4  f3a5                     rep movsd dword ptr es:[edi], dword ptr [esi]
+100F18A6  8bc8                     mov ecx, eax
+100F18A8  83e103                   and ecx, 3
+100F18AB  f3a4                     rep movsb byte ptr es:[edi], byte ptr [esi]
+100F18AD  8b13                     mov edx, dword ptr [ebx]
+100F18AF  8bcb                     mov ecx, ebx
+100F18B1  ff5224                   call dword ptr [edx + 0x24]
+100F18B4  5f                       pop edi
+100F18B5  5e                       pop esi
+100F18B6  c6042800                 mov byte ptr [eax + ebp], 0
+100F18BA  5d                       pop ebp
+100F18BB  5b                       pop ebx
+100F18BC  c20800                   ret 8
+100F18BF  90                       nop 

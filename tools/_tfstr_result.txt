@@ -1,0 +1,39 @@
+image_base = 10000000
+  sect .text    va=00001000 vsize=0013C770 roff=00001000 rsize=0013D000 CODE
+  sect .rdata   va=0013E000 vsize=0002FF20 roff=0013E000 rsize=00030000 
+  sect .data    va=0016E000 vsize=000490E4 roff=0016E000 rsize=00031000 
+  sect .reloc   va=001B8000 vsize=0001760E roff=0019F000 rsize=00018000 
+  sect .patch   va=001D0000 vsize=00001000 roff=001B7000 rsize=00001000 CODE
+total CALL instructions scanned = 8178
+top 20 call targets (RVA):
+  0x000F9C1A  x622
+  0x000EE640  x335
+  0x000F968A  x330
+  0x000F9A7A  x259
+  0x0010076E  x187
+  0x000F1C1A  x179
+  0x000EE620  x157
+  0x000F9CCA  x118
+  0x000F967A  x114
+  0x00112B9E  x102
+  0x000FB04A  x89
+  0x000F753A  x84
+  0x000F5C5A  x84
+  0x000F701A  x80
+  0x001002F0  x75
+  0x000EFC7A  x73
+  0x000F9E3A  x68
+  0x0011232F  x67
+  0x000F756A  x66
+  0x0011281A  x65
+call 0x10054F00 共 0 处：
+ callRVA   retRVA len  sect   in_subtitle
+
+字幕区返回地址集合（hook1 应匹配这些）：
+  
+
+当前白名单（当作返回地址比对）：
+  0x0008DD09  未命中任何返回地址!
+  0x0008DD31  未命中任何返回地址!
+  0x0008E362  未命中任何返回地址!
+  0x0008DDE3  未命中任何返回地址!

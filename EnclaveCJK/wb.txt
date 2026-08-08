@@ -1,0 +1,76 @@
+﻿tfstr_wide_build@@YAHPAXPBXK@Z (int __cdecl tfstr_wide_build(void *,void const *,unsigned long)):
+  00000000: push        ebp
+  00000001: lea         ebp,[esp-0C4h]
+  00000008: sub         esp,0C4h
+  0000000E: push        0FFFFFFFEh
+  00000010: push        offset __sehtable$?tfstr_wide_build@@YAHPAXPBXK@Z
+  00000015: push        offset __except_handler4
+  0000001A: mov         eax,dword ptr fs:[00000000h]
+  00000020: push        eax
+  00000021: sub         esp,2Ch
+  00000024: mov         eax,dword ptr [___security_cookie]
+  00000029: xor         dword ptr [ebp-8],eax
+  0000002C: xor         eax,ebp
+  0000002E: mov         dword ptr [ebp+0C0h],eax
+  00000034: push        ebx
+  00000035: push        esi
+  00000036: push        edi
+  00000037: push        eax
+  00000038: lea         eax,[ebp-10h]
+  0000003B: mov         dword ptr fs:[00000000h],eax
+  00000041: mov         dword ptr [ebp-18h],esp
+  00000044: mov         eax,dword ptr [ebp+0CCh]
+  0000004A: mov         dword ptr [ebp-1Ch],eax
+  0000004D: mov         ebx,dword ptr [ebp+0D0h]
+  00000053: xor         esi,esi
+  00000055: xor         edi,edi
+  00000057: test        eax,eax
+  00000059: je          00000258
+  0000005F: test        ebx,ebx
+  00000061: je          00000258
+  00000067: mov         dword ptr [ebp-4],esi
+  0000006A: nop         word ptr [eax+eax]
+  00000070: cmp         esi,7Dh
+  00000073: jge         000000AE
+  00000075: movzx       eax,word ptr [ebx+esi*2]
+  00000079: push        eax
+  0000007A: call        ?is_body_char@@YAHG@Z
+  0000007F: add         esp,4
+  00000082: test        eax,eax
+  00000084: je          000000AE
+  00000086: movzx       ecx,word ptr [ebx+esi*2]
+  0000008A: lea         eax,[ecx-4E00h]
+  00000090: mov         edx,51FFh
+  00000095: cmp         ax,dx
+  00000098: ja          000000A8
+  0000009A: cmp         cl,20h
+  0000009D: jb          000000A4
+  0000009F: cmp         cl,7Eh
+  000000A2: jbe         000000A8
+  000000A4: inc         edi
+  000000A5: mov         dword ptr [ebp-34h],edi
+  000000A8: inc         esi
+  000000A9: mov         dword ptr [ebp-38h],esi
+  000000AC: jmp         00000070
+  000000AE: mov         dword ptr [ebp-4],0FFFFFFFEh
+  000000B5: cmp         esi,4
+  000000B8: jl          000000C6
+  000000BA: cmp         edi,2
+  000000BD: jl          000000C6
+  000000BF: mov         ecx,1
+  000000C4: jmp         000000C8
+  000000C6: xor         ecx,ecx
+  000000C8: mov         dword ptr [ebp-30h],ecx
+  000000CB: mov         eax,1
+  000000D0: lock xadd   dword ptr [?s_c@?1??tfstr_diag@@YAXKPBGHHH@Z@4JC],eax
+  000000D8: inc         eax
+  000000D9: cmp         eax,3Ch
+  000000DC: jg          000001DA
+  000000E2: cmp         esi,5
+  000000E5: jle         000000F0
+  000000E7: movzx       eax,word ptr [ebx+0Ah]
+  000000EB: mov         dword ptr [ebp-20h],eax
+  000000EE: jmp         000000F7
+  000000F0: mov         dword ptr [ebp-20h],0
+  000000F7: cmp         esi,4
+  000000FA: jle   
