@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16i"
+#define CJK_VERSION "v16j"
 
 #include "pch.h"
 
@@ -506,8 +506,34 @@ done_proc:
 //   - 看不懂的字节形态一律不动 → 最坏退化成"和今天一样"，不会更差
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 #define POST_MAX_WORDS 1000     // out 缓冲 cap = 0x3FF 字符，留余量
+#define POST_SITES     16       // v16j：按 caller 分组的诊断配额（防止被主菜单每帧文本刷爆）
+#define POST_PER_SITE  12
 
-static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD callerRva)
+// v16j：按 caller RVA 分组的 [POST] 记录配额。
+//   返回 1 = 本组允许记录；force=1（含换行码位）强制记录、不占配额。
+//   v16i 用全局 400 条配额，被主菜单「新建游戏」每帧调用刷满，
+//   导致游戏内字幕/教程的 [POST] 一条都记不到 —— 换行 @@ 无据可查。
+static int post_quota(DWORD callerRva, int force)
+{
+    static DWORD s_site[POST_SITES];
+    static LONG  s_cnt[POST_SITES];
+    static LONG  s_sites = 0;
+    LONG i, n;
+    if (force) return 1;
+    for (i = 0; i < s_sites; i++)
+        if (s_site[i] == callerRva) break;
+    if (i >= s_sites)
+    {
+        n = InterlockedIncrement(&s_sites) - 1;          // 原子分配新槽
+        if (n >= POST_SITES) { InterlockedDecrement(&s_sites); return 0; }
+        s_site[n] = callerRva; s_cnt[n] = 0;
+        i = n;
+    }
+    n = InterlockedIncrement(&s_cnt[i]);
+    return n <= POST_PER_SITE;
+}
+
+static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD callerRva, int cap)
 {
     __try
     {
@@ -523,10 +549,14 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
         //   判据：只有【本身含 CJK 汉字或全角字符】的输出才是"要显示给玩家的汉化文本"，
         //   才允许补全角化；纯 ASCII 输出一律不动（宁可它显示成 @，也不能毁掉内部 key）。
         //   教程文本展开后 = 「按(全角) SPACE(半角) 来跳跃(全角)」→ 含 CJK ✓ 命中。
-        int hasAscii = 0, hasCjk = 0, nw = 0;
-        for (int k = 0; k < POST_MAX_WORDS && out[k] != 0; k++)
+        int hasAscii = 0, hasCjk = 0, hasNl = 0, nw = 0;
+        // v16j：以 cap 为硬上限，绝不越过 out 缓冲的实际容量（防越界读/写坏缓冲）
+        int limit = (cap > 0 && cap < POST_MAX_WORDS) ? cap : POST_MAX_WORDS;
+        for (int k = 0; k < limit && out[k] != 0; k++)
         {
             WORD c = out[k];
+            if (c == 0x000A || c == 0x000D || c == 0x2028 || c == 0x0085 || c == 0x000B)
+                hasNl = 1;                                  // 换行/行分隔候选 → 强制取证
             if (c >= 0x21 && c <= 0x7E) hasAscii = 1;
             else if ((c >= 0x4E00 && c <= 0x9FFF) ||    // CJK 统一汉字
                      (c >= 0x3000 && c <= 0x303F) ||    // CJK 标点
@@ -537,12 +567,13 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
         if (!hasCjk)
         {
             // 纯 ASCII / 无中文 → 不是玩家可见汉化文本，放行不动。
-            // 仍记少量取证，便于判断是否误伤（前 20 条）。
-            if (hasAscii && n <= 20)
+            // v16j：含换行码位的纯 ASCII 文本也强制记录（换行取证）；
+            //       其余按 caller 分组配额记前若干条（判断是否误伤）。
+            if (hasAscii && (hasNl || post_quota(callerRva, 0)))
             {
                 char sb[256];
-                wsprintfA(sb, "[POST-SKIP %ld] caller=%05X out=%08X len=%d (no CJK)\n",
-                          n, callerRva, outPtr, nw);
+                wsprintfA(sb, "[POST-SKIP %ld] caller=%05X out=%08X len=%d nl=%d (no CJK)\n",
+                          n, callerRva, outPtr, nw, hasNl);
                 HANDLE hs = CreateFileA("CJK_post_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
                                         NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
                 if (hs != INVALID_HANDLE_VALUE)
@@ -556,16 +587,16 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
         }
 
         int i = 0, fixed = 0;
-        while (i < POST_MAX_WORDS)
+        while (i < limit)
         {
             WORD w = out[i];
             if (w == 0) break;
             if (w == 0x00A7)                    // § 控制码 → 原样跳过（§Z22 / §C… 字号颜色）
             {
                 i++;
-                if (i >= POST_MAX_WORDS || out[i] == 0) break;
+                if (i >= limit || out[i] == 0) break;
                 i++;                                                        // 码字母（Z/C/…）
-                while (i < POST_MAX_WORDS && out[i] >= 0x30 && out[i] <= 0x39) i++;  // 数字参数
+                while (i < limit && out[i] >= 0x30 && out[i] <= 0x39) i++;  // 数字参数
                 continue;
             }
             if (w >= 0x21 && w <= 0x7E) { out[i] = (WORD)(w + 0xFEE0); fixed++; }  // 半角 → 全角
@@ -578,13 +609,13 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
         //   0x20FB2 是 GameWorld 9 个 Localize_Str(CStr) 调用点之一，其上游还有
         //   021942 / 021E9B / 03319F / 0334CF / 05E3AF / 05E6DF / 0E3D37 / 0E3E37。
         //   若教程提示不走本点，这份日志会是空的 —— 那就直接锁定"要改 hook 点"。
-        if (hasAscii && n <= 400)
+        if (hasAscii && (hasNl || post_quota(callerRva, 0)))
         {
-            char buf[1024];
+            char buf[1152];
             char* p = buf;
-            p += wsprintfA(p, "[POST %ld] caller=%05X out=%08X len=%d fixed=%d\n",
-                           n, callerRva, outPtr, i, fixed);
-            for (int k = 0; k < 72 && k < i; k++)
+            p += wsprintfA(p, "[POST %ld] caller=%05X out=%08X len=%d fixed=%d nl=%d cap=%d\n",
+                           n, callerRva, outPtr, i, fixed, hasNl, cap);
+            for (int k = 0; k < 160 && k < i; k++)
                 p += wsprintfA(p, "%04X ", (unsigned)out[k]);
             p += wsprintfA(p, "\n");
             HANDLE h = CreateFileA("CJK_post_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
@@ -653,7 +684,7 @@ static void __declspec(noinline) __cdecl my_LocCStr(CStrVal src, WORD* out, int 
     g_origLocCStr(src, out, cap);                            // 先让引擎完成 §L 展开
     InterlockedIncrement((volatile LONG*)&g_postHits);
     safe_fullwidth_expanded((DWORD)out,
-                            (DWORD)_ReturnAddress() - g_gwBase);
+                            (DWORD)_ReturnAddress() - g_gwBase, cap);
 }
 
 static void __declspec(noinline) __cdecl my_LocNarrow(const char* src, WORD* out, int cap)
@@ -662,7 +693,7 @@ static void __declspec(noinline) __cdecl my_LocNarrow(const char* src, WORD* out
     g_origLocNarrow(src, out, cap);
     InterlockedIncrement((volatile LONG*)&g_postHits);
     safe_fullwidth_expanded((DWORD)out,
-                            (DWORD)_ReturnAddress() - g_gwBase);
+                            (DWORD)_ReturnAddress() - g_gwBase, cap);
 }
 
 static void __declspec(noinline) __cdecl my_LocWide(const WORD* src, WORD* out, int cap)
@@ -671,7 +702,7 @@ static void __declspec(noinline) __cdecl my_LocWide(const WORD* src, WORD* out, 
     g_origLocWide(src, out, cap);
     InterlockedIncrement((volatile LONG*)&g_postHits);
     safe_fullwidth_expanded((DWORD)out,
-                            (DWORD)_ReturnAddress() - g_gwBase);
+                            (DWORD)_ReturnAddress() - g_gwBase, cap);
 }
 
 static DWORD g_gcBase = 0;                       // GameClasses.dll 基址
@@ -683,7 +714,7 @@ static void __declspec(noinline) __cdecl my_LocGcNarrow(const char* src, WORD* o
     InterlockedIncrement((volatile LONG*)&g_postHits);
     // 最高位置 1 标记「来自 GameClasses」，与 GameWorld 的 RVA 一眼可分
     safe_fullwidth_expanded((DWORD)out,
-                            0x80000000u | ((DWORD)_ReturnAddress() - g_gcBase));
+                            0x80000000u | ((DWORD)_ReturnAddress() - g_gcBase), cap);
 }
 
 // 改写一个 IAT 槽：校验通过才写。返回 1 = 成功
@@ -1637,12 +1668,35 @@ static BOOL install_hook(void)
 
 static DWORD WINAPI wait_thread(LPVOID)
 {
-    for (;;)
+    // 阶段 1：等 GameWorld 就绪，装主 hook（含 GW 3 槽 IAT）
+    while (!install_hook())
+        Sleep(100);
+    // 阶段 2：v16j —— GameClasses 通常晚于 install_hook 加载。
+    //         原代码 install_hook 一次成功（g_hooked=TRUE）就 return，
+    //         GC/narrow IAT 永远补不上 → 教程 HUD（若在 GameClasses）
+    //         的 §L 键名永不全角化 → 「按 @@@@ 拔出武器」。
+    //         这里持续轮询直到 GC/narrow 补 hook 成功（最多 30 秒）。
+    for (int tries = 0; tries < 300; tries++)
     {
-        if (install_hook())
-            return 0;
+        if (g_origLocGcNarrow) return 0;              // 已补成功
+        HMODULE hMs = GetModuleHandleA("MSystem.dll");
+        HMODULE hGc = GetModuleHandleA("GameClasses.dll");
+        if (hMs && hGc && !g_origLocGcNarrow)
+        {
+            FARPROC pN = GetProcAddress(hMs, "?Localize_Str@@YAXPBDPAGH@Z");
+            g_gcBase = (DWORD)hGc;
+            int n = iat_hook_one(g_gcBase, IAT_GC_NARROW_RVA, pN,
+                                 (void*)my_LocGcNarrow,
+                                 (void**)&g_origLocGcNarrow, "GC/narrow");
+            g_iatCount += n;
+            log_msg("[CJK] wait_thread 补 GC/narrow IAT: %s (iat=%d/4)\n",
+                    n ? "成功" : "校验失败/跳过", g_iatCount);
+            if (n) return 0;
+        }
         Sleep(100);
     }
+    log_msg("[CJK] wait_thread 30s 超时：GameClasses 未加载，GC/narrow 未补\n");
+    return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
