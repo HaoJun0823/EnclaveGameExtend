@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16x"
+#define CJK_VERSION "v16y"
 
 #include "pch.h"
 
@@ -1275,6 +1275,140 @@ static int install_findkey_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ★ v16y：hook CKeyContainer::GetKeyName（MCCdyn RVA 0x34570）——教程键名显示名唯一源头！
+//   __thiscall CStr GetKeyName(CKeyContainer* this, int index)
+//   （CStr 按值返回 = hidden ret ptr）函数头 = 51 8B 41 0C 85 C0（6 字节），尾 ret 8。
+//   eax = ret_ptr（CStr* 8 字节 [vtable][data_ptr]）→ post 里全角化/汉字映射键名。
+//   ★ 为什么是它：教程 HUD 的 §L 键名（'MOUSEBUTTON1'）来自 STRINGTABLES\DYNAMIC 注册值，
+//     注册时 EXE 用 vtable+376（= CKeyContainer 查键名显示名）获取 → hook 它的返回 = 源头替换！
+// ═══════════════════════════════════════════════════════════════════════
+#define MCC_KEYNAME_RVA 0x34570u
+#define KEYNAME_HDR_BYTES 6
+static BYTE  g_origKeyNameBody[KEYNAME_HDR_BYTES];
+static void* g_keyNameTramp = NULL;
+static BOOL  g_hookedKeyName = FALSE;
+static DWORD g_keyNameOrigRet = 0;
+
+// post：eax = ret_ptr（CStr*）→ data_ptr = [ret_ptr+4] → 键名全角化/汉字映射 + 日志
+static void __cdecl cjk_keyname_post_c(DWORD retPtr)
+{
+    static volatile LONG s_n = 0;
+    char sb[700], *p;
+    WORD* data;
+    LONG n;
+    int i, fixed;
+    if (!retPtr) return;
+    __try
+    {
+        data = *(WORD**)(retPtr + 4);
+        if (!data || data == (WORD*)-2) return;
+        // 数据 = [标志 WORD(bit15 宽)][UTF-16 正文] → 正文从 data+1 起（与 FindKeyValue 同布局）
+        fixed = 0;
+        for (i = 1; i < 256 && data[i]; i++)
+        {
+            WORD c = data[i];
+            if (c >= 0x21 && c <= 0x7E) { data[i] = (WORD)(c + 0xFEE0); fixed++; }  // 半角→全角（字库 A3 区有字形）
+            else if (c == 0x20)          { data[i] = 0x3000;            fixed++; }  // 空格→全角空格
+        }
+        // 日志（前 200 条）
+        n = InterlockedIncrement(&s_n);
+        if (n <= 200)
+        {
+            p = sb;
+            p += wsprintfA(p, "[KEYNAME %ld] caller=%08X ret=%08X fixed=%d | ", n,
+                           g_keyNameOrigRet - 0x10000000, retPtr, fixed);
+            for (i = 0; i < 20; i++)
+                p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+            p += wsprintfA(p, "\n");
+            {
+                HANDLE h = CreateFileA("CJK_keyname_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                       NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (h != INVALID_HANDLE_VALUE)
+                {
+                    SetFilePointer(h, 0, NULL, FILE_END);
+                    DWORD wn; WriteFile(h, sb, (DWORD)(p - sb), &wn, NULL);
+                    CloseHandle(h);
+                }
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+// 原函数 ret 8 后跳入的 post。进入时 eax = ret_ptr（原函数 mov eax,esi 后 ret 8）。
+// 栈：原函数 ret 8 已弹返回地址并清 ret_ptr+index → 栈顶 = 调用者栈 → jmp 回原调用者（v16r 教训）
+static void __declspec(naked) cjk_keyname_post(void)
+{
+    __asm
+    {
+        pushad
+        mov  eax, [esp + 0x1C]           ; 原 eax = ret_ptr（CStr*）
+        push eax
+        call cjk_keyname_post_c
+        add  esp, 4
+        popad
+        jmp  dword ptr [g_keyNameOrigRet] ; ★ v16r：不 ret，jmp 回保存的原调用者
+    }
+}
+static DWORD cjk_keyname_post_addr = (DWORD)cjk_keyname_post;
+
+static void __declspec(naked) cjk_keyname_hook_impl(void)
+{
+    __asm
+    {
+        ; 进入：栈 [ret_to_caller, ret_ptr, index]（__thiscall，CStr 按值返回）
+        push ebp
+        mov  ebp, esp
+        push eax
+        mov  ecx, cjk_keyname_post_addr  ; post 地址
+        mov  eax, [ebp + 4]              ; 原返回地址
+        mov  g_keyNameOrigRet, eax       ; 保存 → post 里 jmp 回
+        mov  [ebp + 4], ecx              ; 替换 → 原函数 ret 8 后先到 post
+        pop  eax
+        pop  ebp
+        jmp  dword ptr [g_keyNameTramp]  ; 跳板：原 6 字节 + jmp 原函数+6
+    }
+}
+
+static int install_keyname_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMc;
+    int i;
+    static const BYTE expect[KEYNAME_HDR_BYTES] = {0x51, 0x8B, 0x41, 0x0C, 0x85, 0xC0};
+    if (g_hookedKeyName) return 1;
+    hMc = GetModuleHandleA("MCCdyn.dll");
+    if (!hMc) return 0;
+    entry = (BYTE*)hMc + MCC_KEYNAME_RVA;
+    memcpy(g_origKeyNameBody, entry, KEYNAME_HDR_BYTES);
+    for (i = 0; i < KEYNAME_HDR_BYTES; i++)
+        if (g_origKeyNameBody[i] != expect[i])
+        {
+            log_msg("[CJK] GetKeyName 落点核验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+                    g_origKeyNameBody[0], g_origKeyNameBody[1], g_origKeyNameBody[2],
+                    g_origKeyNameBody[3], g_origKeyNameBody[4], g_origKeyNameBody[5]);
+            return 0;
+        }
+    g_keyNameTramp = VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_keyNameTramp) return 0;
+    memcpy(g_keyNameTramp, g_origKeyNameBody, KEYNAME_HDR_BYTES);
+    ((BYTE*)g_keyNameTramp)[KEYNAME_HDR_BYTES] = 0xE9;
+    *(DWORD*)((BYTE*)g_keyNameTramp + KEYNAME_HDR_BYTES + 1) =
+        ((DWORD)entry + KEYNAME_HDR_BYTES) - ((DWORD)g_keyNameTramp + KEYNAME_HDR_BYTES + 5);
+    if (!VirtualProtect(entry, KEYNAME_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_keyname_hook_impl - ((DWORD)entry + 5);
+    entry[5] = 0x90;   // 原第 6 字节（test eax,eax 第 2 字节）→ nop
+    VirtualProtect(entry, KEYNAME_HDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, KEYNAME_HDR_BYTES);
+    g_hookedKeyName = TRUE;
+    log_msg("[CJK] v16y CKeyContainer::GetKeyName 本体 hook：%08X -> %08X（教程键名源头）\n",
+            (DWORD)entry, (DWORD)cjk_keyname_hook_impl);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ★ v16t：hook CImage::Write（MSystem RVA 0x3DE10）——文本绘制的最终出口！
 //   __thiscall Write(CImage* this, CRct rect(16B), const CStr& text)
 //   text（CStr*）= [esp+0x14]（入口处）。函数头 = mov eax, fs:0（64 A1 00 00 00 00，6 字节）。
@@ -2232,6 +2366,8 @@ static BOOL install_hook(void)
             install_wide_body_hook();
             // ★ v16q：hook Localize_FindKeyValue 本体（教程 §L 键名查表点 → 键名汉字映射）
             install_findkey_hook();
+            // ★ v16y：hook CKeyContainer::GetKeyName（MCCdyn）——教程键名显示名源头
+            install_keyname_hook();
             // ★ v16t：hook CImage::Write 本体（文本绘制出口，前置全角化 → 覆盖教程/字幕/UI）
             install_draw_hook();
 
