@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18e"
+#define CJK_VERSION "v18f"
 
 #include "pch.h"
 
@@ -1835,15 +1835,16 @@ static void __declspec(naked) cjk_subst_key_impl(void)
     __asm
     {
         ; 进入：esp→src, esp+4→0x01(源宽标志), esp+8→len(v14); ecx=目标, edx=1
-        ; 键名判别：首字节 0x27（'）或首 word 0x0027（宽 '）
-        movzx eax, byte ptr [esp]
-        cmp  eax, 0x27
+        ; 键名判别：解引用源指针读首字节 0x27（' 窄键名）或首 word 0x0027（宽键名）
+        ; ★v18f：v18e 误写 byte ptr [esp]（读栈上源指针低字节，键名检测完全失效 + 随机误判）
+        mov  eax, [esp]                 ; eax = 源指针
+        cmp  byte ptr [eax], 0x27
         je   subst_key
-        movzx eax, word ptr [esp]
-        cmp  eax, 0x0027
+        cmp  word ptr [eax], 0x0027
         je   subst_key
         ; ── 非键名（宽文本值）：模拟原 call 0x44EA ──
-        ;   push 返回地址(0x10ABEF) → jmp 原 0x44EA（hook 入口 → a4=1 → trampoline 原逻辑）
+        ;   push 返回地址(0x10ABEF) → jmp 0x44EA 原入口（v18f 禁用 0x44EA 本体 hook，
+        ;   直接走原逻辑；宽文本完全不受影响）
         push  dword ptr [g_substRetVA]
         jmp   dword ptr [g_convOrigVA]
     subst_key:
@@ -2908,10 +2909,11 @@ static BOOL install_hook(void)
             //   教程渲染用运行时 §L 名（.xrg）查 DYNAMIC → GetValue(PBD) → 返回 '键名'。
             //   post 模式：key 含 TUTORIAL_ → 返回值 data 改写（'键名' → 中文）+ 日志。
             install_getval_hook();
-            // ★ v18d：hook 0x44EA 函数本体（窄源→宽目标全角化，其他调用点受益）
-            // ★ v18e：hook 0x10ABEA 调用点（键名'XXX'特征判别——键名全角化，
-            //   宽文本值模拟原 call 0x44EA 原样处理；回滚 v18d 的 push1→0 一刀切）
-            install_conv_hook();
+            // ★ v18f：hook 0x10ABEA 调用点（键名'XXX'首字符判别——键名全角化，
+            //   宽文本值模拟原 call 0x44EA 原样处理）。
+            //   【v18f 禁用 0x44EA 本体 hook】：v18e 实测崩溃（0xC0000096 空跳转）——
+            //   0x44EA 有 10 个调用点，本体 hook 拦截全部，其他场景特殊数据被全角化
+            //   破坏 → 崩溃风险。仅保留 0x10ABEA 调用点 handler（影响面最小）。
             install_subst_hook();
             // ★ v16t：hook CImage::Write 本体（文本绘制出口，前置全角化 → 覆盖教程/字幕/UI）
             install_draw_hook();
