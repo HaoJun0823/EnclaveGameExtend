@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16u"
+#define CJK_VERSION "v16v"
 
 #include "pch.h"
 
@@ -1090,12 +1090,12 @@ static void key_replace(WORD* t, int maxw)
 // post：原函数 ret 后被跳入。栈 [a1, a2]（__cdecl，调用者未清栈）。
 static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
 {
-    static char s_keySeen[64][40];
-    static int  s_keySeenN = 0;
+    static volatile LONG s_n = 0;
     char sb[900], *p;
     WORD* data;
     const char* k;
-    int i, kl, seenCnt;
+    LONG n;
+    int i, kl;
     if (!a1) return;
     __try
     {
@@ -1105,25 +1105,13 @@ static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
         kl = 0;
         __try { while (k[kl] && kl < 40) kl++; }
         __except (EXCEPTION_EXECUTE_HANDLER) { kl = 0; }
-        // ★ v16s：按 key 去重（同 key 最多记 2 次，记录替换前/后）——STD_LOADING 不再刷爆，
-        //   教程的 TUTORIAL_* / KB_* 查表终于能进日志。
-        seenCnt = 0;
-        for (i = 0; i < s_keySeenN && i < 64; i++)
-            if (key_eq(s_keySeen[i], k))
-            {
-                seenCnt++;
-                if (seenCnt >= 2) return;
-            }
-        if (s_keySeenN < 64)
-        {
-            int cp = kl < 39 ? kl : 39;
-            for (i = 0; i < cp; i++) s_keySeen[s_keySeenN][i] = k[i];
-            s_keySeen[s_keySeenN][cp] = 0;
-            s_keySeenN++;
-        }
+        // ★ v16v：前 300 条全记录（去掉 v16s 按 key 去重——「单键」出现但 TUTORIAL key 未记录，
+        //   怀疑去重/配额误伤，全量记录保教程调用可见）
+        n = InterlockedIncrement(&s_n);
+        if (n > 300) return;
         // 替换前 dump
         p = sb;
-        p += wsprintfA(p, "[KEY] caller=%08X key=", g_keyCaller - g_msBase);
+        p += wsprintfA(p, "[KEY %ld] caller=%08X key=", n, g_keyCaller - g_msBase);
         for (i = 0; i < kl; i++)
             p += wsprintfA(p, "%c", (k[i] >= 0x20 && k[i] < 0x7F) ? k[i] : '.');
         p += wsprintfA(p, " out=%08X | ", a1);
@@ -1144,7 +1132,7 @@ static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
         key_replace(data + 1, 512);
         // 替换后 dump
         p = sb;
-        p += wsprintfA(p, "[KEY->]         | ");
+        p += wsprintfA(p, "[KEY->%ld]       | ", n);
         for (i = 0; i < 20; i++)
             p += wsprintfA(p, "%04X ", (unsigned)data[i]);
         p += wsprintfA(p, "\n");
@@ -1253,22 +1241,17 @@ static void* g_drawTramp = NULL;
 static BOOL  g_hookedDraw = FALSE;
 static DWORD g_drawOrigRet = 0;
 
-// 记录含中文（>0x7F 字节）的绘制文本前 32 WORD → CJK_draw2_log.txt（配额 300）
+// ★ v16v：记录所有绘制文本前 32 WORD → CJK_draw2_log.txt（前 300 条，不过滤）——
+//   教程缓冲若走 CImage::Write 必记录（v16u 的 hasHi 过滤可能误伤）
 static void draw_log2(const WORD* data)
 {
     static volatile LONG s_c = 0;
     LONG n;
-    int i, hasHi = 0, hasAscii = 0;
+    int i;
     char sb[900], *p;
     if (!data) return;
     __try
     {
-        for (i = 0; i < 128 && data[i]; i++)
-        {
-            if (data[i] >= 0x100 || (data[i] >= 0x80 && data[i] < 0x100)) { hasHi = 1; break; }
-            if (data[i] >= 0x21 && data[i] <= 0x7E) hasAscii = 1;
-        }
-        if (!hasHi) return;   // 纯 ASCII 资源名/路径不记录
         n = InterlockedIncrement(&s_c);
         if (n > 300) return;
         p = sb;
