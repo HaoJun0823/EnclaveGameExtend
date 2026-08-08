@@ -1,5 +1,5 @@
 ﻿// ============================================================================
-//  EnclaveCJK  v16b   (2026-08-08，止血 + 三缺陷同修版)
+//  EnclaveCJK  v16d   (2026-07-22，hook1 真正生效版)
 // ============================================================================
 //  背景：v18~v20.2 一路激进改渲染路径，全部失败并造成倒退。本版【停止试探】，
 //        回到 v15b 已验证可用的三 hook 架构，只做定点修正。
@@ -8,7 +8,7 @@
 //    [0] 0x20FB2  Localize_Str 调用点 —— 字幕文本入口（实证 sub=28746 条经过）
 //                 判据：[esp+0x48A4] RVA ∈ [0x8D000,0x8F000]
 //                 处理：置宽 flags|0x8000 → 剥 §Z → 残留终止符截断 → ASCII 全角化
-//    [1] 0x54F00  TFStr<252> 宽构造（hook1），调用者白名单过滤
+//    [1] 0x54F00  TFStr<252> 宽构造（hook1），调用者【区间】过滤（v16d 由白名单改来）
 //    [2] 0x8ED1A  拼接长度修正（hook3），调用者区间过滤
 //
 //  ── 本版修正的三个缺陷 ────────────────────────────────────────────────
@@ -19,15 +19,16 @@
 //             调用者，仅字幕区 [0x8D000,0x8F000] 才改长度，资源名等原样放行)。
 //       v16b 追加：NULL 守卫必须在 lea 之【前】，否则 NULL→4 会绕过判空再次崩溃。
 //
-//   (2) "攀上" 类整句截断（两个独立成因，均已修）
-//       根因 a：hook1 调用者白名单只有 3 个，漏了第 4 个字幕构造点
-//               0x8DDE3（call 0x54F00 @ 0x8DDDE）→ 该路径的宽串没被正确构造。
-//               修正：补回 TFSTR_CALLER_4 = 0x8DDE3。
-//               核对：全库 79 个 call 0x54F00 中落在字幕区的恰好 4 个，无遗漏无多余。
-//       根因 b：截断规则把"下一个 WORD 含 0 字节"直接当残留终止符，
-//               但 攀(U+6500)、一(U+4E00) 这类【低字节本就是 0x00 的合法汉字】
-//               会被误判 → 整句在此腰斩。
-//               修正：加 junk_ahead() 前瞻门控，必须同时探到绝对垃圾才截断。
+//   (2) "攀上" 类整句截断（v16d 修正）
+//       根因（决定性）：hook1 调用者白名单用的是【call 指令地址】(0x8DD09/0x8DD31/
+//             0x8E362/0x8DDE3)，但 trampoline 比对的是【call 之后的返回地址】
+//             (= call 站点 + 5，如 0x8DD0E) → 永远对不上 → 全部 fallback 走窄构造
+//             → 攀(U+6500 低字节 0x00)被 vsnprintf %s / strlen 截断 → 整句腰斩，
+//             且窄构造把 UTF-16 当窄字节造出垃圾缓冲 → 句尾偶发 @。
+//       修正（v16d）：hook1 改用【调用者区间过滤】[0x8D000,0x8F000]（与 hook3 一致），
+//             不再逐个比对地址；并加 UTF-16 内容判定（字节[1]==0 或 ∈[0x4E,0xA0)）
+//             只对字幕区 UTF-16 文本宽构造，避免误伤窄文本。junk_ahead 门控保留。
+//       注：句尾 @ 与 攀截断同根（hook1 未命中导致窄构造垃圾缓冲），hook1 命中后一并消失。
 //
 //   (3) 句尾 @@@@ / 闪烁
 //       ★ 曾误判为"句号 。字形缺失"。45820 条实测日志（CJK_sub_log.txt）统计推翻：
@@ -46,7 +47,7 @@
 //     vtable 替换 / 渲染路径 hook（0x10020F60、vtable+0xB8、拼接调用、GetKey、
 //     终止符写入 0x8ED9A）—— 全部导致乱码或崩溃。
 // ============================================================================
-#define CJK_VERSION "v16c"
+#define CJK_VERSION "v16d"
 
 #include "pch.h"
 
@@ -431,67 +432,127 @@ static BYTE g_origTfstrLen[5];
 static BOOL g_hookedTfstr = FALSE;
 static BOOL g_hookedTfstrLen = FALSE;
 
+// ────────────────────────────────────────────────────────────────────────
+// ★ v16d 诊断：记录字幕区 TFStr 构造调用（前 60 条）→ CJK_tfstr_log.txt
+//   目的：一次运行即可拿到真实 retRVA + 文本首字，供后续精确定位调用点。
+// ────────────────────────────────────────────────────────────────────────
+static void tfstr_diag(DWORD retRva, const WORD* w, int n, int strong, int wide)
+{
+    static volatile LONG s_c = 0;
+    LONG k = InterlockedIncrement(&s_c);
+    if (k > 60) return;
+    char buf[192];
+    wsprintfA(buf, "[TFSTR] ret=%05X n=%d strong=%d %s | %04X %04X %04X %04X %04X %04X\r\n",
+              retRva, n, strong, wide ? "WIDE" : "orig",
+              n > 0 ? w[0] : 0, n > 1 ? w[1] : 0, n > 2 ? w[2] : 0,
+              n > 3 ? w[3] : 0, n > 4 ? w[4] : 0, n > 5 ? w[5] : 0);
+    HANDLE h = CreateFileA("CJK_tfstr_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    SetFilePointer(h, 0, NULL, FILE_END);
+    DWORD written;
+    WriteFile(h, buf, lstrlenA(buf), &written, NULL);
+    CloseHandle(h);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// ★ v16d 核心：字幕区 TFStr<252> 宽构造（用 C 实现，替代原汇编版）
+//
+//   为什么可以完全重写（反汇编定案 2026-07-22）：
+//     0x100F18CA 基类构造 = 只写 vtable 0x101496DC，无其它字段
+//     0x10054F3E             = 覆写 vtable 为 0x101445FC（TFStr<252>）
+//     0x100F187A Assign      = GetCapacity 限长 → memcpy → 写 1 字节 0，【不存长度】
+//   ⇒ TFStr<252> 的全部状态 = [obj+0] vtable + [obj+4..255] 内联数据缓冲。
+//     所以「设 vtable + 拷贝数据 + 写终止符」与引擎原生构造等价。
+//
+//   原构造为什么会截断：0x10054F5D 调 vsnprintf(buf, 0xFC, 文本, va) —— 文本被当
+//   【窄格式串】，UTF-16 里低字节为 0x00 的汉字（攀 U+6500 → 字节 00 65、一 4E00、
+//   需 9700 …共 554 处）在此处终止 → "以及他们攀上…" 只剩 "以及他们"。
+//
+//   返回 1 = 已完成构造（trampoline 直接 ret）；0 = 放行原逻辑。
+// ────────────────────────────────────────────────────────────────────────
+static int __cdecl tfstr_wide_build(void* obj, const void* text, DWORD retRva)
+{
+    const WORD* w = (const WORD*)text;
+    int n = 0, strong = 0, wide = 0, i;
+    if (!obj || !text) return 0;
+
+    __try
+    {
+        // 1) 以「合法字幕正文字符」为边界求长度。
+        //    ★ 刻意不以 0x0000 为界：万一判据误判窄串，也不会顺着堆内存一路拷到
+        //      下一个 00 00，从而杜绝把堆垃圾拖进正文（句尾 @ 的经典成因）。
+        while (n < TFSTR_MAX_WORDS && is_body_char(w[n]))
+        {
+            WORD c = w[n];
+            if (c >= 0x4E00 && c <= 0x9FFF)
+            {
+                BYTE lo = (BYTE)(c & 0xFF);
+                // 低字节不可打印 ⇒ 这个 WORD 不可能是「两个 ASCII 字符」的窄串误读
+                if (lo < 0x20 || lo > 0x7E) strong++;
+            }
+            n++;
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+    // 2) 严格判据（宁可放行也不误判）：
+    //    n >= 4      → 挡掉引擎窄格式串 "§Z%i"/"§Z22"（只有 2 个 WORD，
+    //                  其字节 A7 5A 25 69 误读成 WORD 后同样落在 CJK 区间）
+    //    strong >= 2 → 至少两个「低字节不可打印的汉字」，纯 ASCII 窄串永远不满足
+    wide = (n >= 4 && strong >= 2);
+    tfstr_diag(retRva, w, n, strong, wide);
+    if (!wide) return 0;
+
+    // 3) 宽构造：vtable + 完整 WORD 拷贝 + 宽终止符（125 字 × 2 + 2 = 252，正好装满）
+    *(DWORD*)obj = g_gwBase + TFSTR_VTABLE_RVA;
+    {
+        WORD* dst = (WORD*)((BYTE*)obj + 4);
+        for (i = 0; i < n; i++) dst[i] = w[i];
+        dst[n] = 0;
+    }
+    return 1;
+}
+
 // ★ hook 1：0x10054F00（TFStr<252> 构造）——UTF-16 宽构造
-//   入口：[esp]=返回地址、[esp+4]=目标对象、[esp+8]=文本指针（cdecl，2 参数，调用者批量清理）
-//   ★ v15（09:55）：加"调用者过滤"——只有字幕路径的 3 个调用点走宽构造，
-//     其他调用（UI/菜单等）原样 fallback → 修复 v14 误伤通用函数写坏栈的崩溃
-//     字幕调用点（返回地址 RVA）：0x1008DD09（正文构造）/ 0x1008DD31（§Z前缀）/ 0x1008E362（Load TEXT）
-#define TFSTR_CALLER_1       0x8DD09u
-#define TFSTR_CALLER_2       0x8DD31u
-#define TFSTR_CALLER_3       0x8E362u
-#define TFSTR_CALLER_4       0x8DDE3u    // ★ v16：补回漏掉的第 4 个字幕构造调用点（call 0x54F00 @ 0x8DDDE）
+//   入口：[esp]=返回地址、[esp+4]=目标对象(this)、[esp+8]=格式串/文本（cdecl 变参，调用者清栈）
+//   ★ v16d 改动：
+//     ① 【调用者区间过滤】[0x8D000,0x8F000]（与 hook3 一致），不再逐个比对地址。
+//        原因：旧版白名单 0x8DD09/0x8DD31/0x8E362/0x8DDE3 是【call 指令地址】，
+//              而 trampoline 比对的是【返回地址】= call 地址 + 5 → 永远对不上
+//              → 全部 fallback 走窄构造 → 攀(U+6500) 截断 + 句尾偶发 @。
+//     ② 宽构造逻辑整体迁到 C（tfstr_wide_build），汇编只做过滤与转交。
+//        原汇编版有三处从未被执行过、一旦命中即引爆的隐患：
+//          a. movzx ebx,[ecx+1] 在 fallback 前破坏 EBX（callee-saved）→ 调用者寄存器损坏
+//          b. pushad/popad 不配对（诊断插入后多出一个 popad）→ 栈错位
+//          c. 空串时 mov ebx,ecx=0 → dec/jnz 变 4G 次循环 → 越界写死
+//        C 版天然规避，并可用 SEH 保护指针扫描。
 static void __declspec(naked) cjk_tfstr_trampoline_impl(void)
 {
     __asm
     {
-        ; ★ v15 调用者过滤：返回地址 [esp] ∈ 字幕 3 个调用点 → 宽构造；否则 fallback
-        mov eax, [esp]               ; 返回地址
-        sub eax, g_gwBase            ; 转 RVA
-        cmp eax, TFSTR_CALLER_1
-        je  tfstr_check
-        cmp eax, TFSTR_CALLER_2
-        je  tfstr_check
-        cmp eax, TFSTR_CALLER_3
-        je  tfstr_check
-        cmp eax, TFSTR_CALLER_4
-        je  tfstr_check
-        jmp tfstr_fallback           ; 非字幕调用 → 原逻辑
-    tfstr_check:
-        ; ★ v15b（09:56）：去掉 UTF-16 检测——字幕 3 个调用点的文本必然是 UTF-16
-        ;   （xrg 是 UTF-16；中文高字节≠0，"字节[1]==0"检测只对 ASCII UTF-16 有效 → 中文漏检）
-        mov eax, [esp + 8]           ; 文本指针
-        test eax, eax
+        ; ★ v16d 调用者区间过滤：返回地址 RVA ∈ [0x8D000,0x8F000] 才是字幕 TFStr 构造
+        ;   只使用 EAX/ECX/EDX（caller-saved）。★ 绝不能碰 EBX/ESI/EDI/EBP：
+        ;   fallback 会跳回原函数，原函数保存/恢复的是我们改坏的值 → 调用者寄存器损坏。
+        mov eax, [esp]               ; 返回地址（原始 caller）
+        sub eax, g_gwBase            ; → RVA
+        cmp eax, SUB_LO
+        jb  tfstr_fallback
+        cmp eax, SUB_HI
+        ja  tfstr_fallback
+        mov ecx, [esp + 8]           ; 文本指针（arg2 / 格式串）
+        test ecx, ecx
         jz  tfstr_fallback
-        ; ★ UTF-16 宽构造（完全重写，不经过 vsnprintf %s）
-        pushad
-        mov esi, [esp + 0x24]        ; 目标（pushad 后 [esp+0x20+4]）
-        mov edi, [esp + 0x28]        ; 文本（[esp+0x20+8]）
-        ; 1) 设 TFStr vtable
-        mov eax, g_gwBase
-        add eax, TFSTR_VTABLE_RVA
-        mov dword ptr [esi], eax
-        ; 2) wcslen（数 WORD 到 0，上限 125）
-        xor ecx, ecx
-    tfstr_wcs:
-        cmp word ptr [edi + ecx*2], 0
-        je  tfstr_wcs_done
-        inc ecx
-        cmp ecx, TFSTR_MAX_WORDS
-        jl  tfstr_wcs
-    tfstr_wcs_done:
-        ; 3) WORD 拷贝到 [esi+4]（内嵌数据区，GetData=[ecx+4]）
-        lea eax, [esi + 4]
-        mov ebx, ecx
-    tfstr_copy:
-        mov dx, word ptr [edi]
-        mov word ptr [eax], dx
-        add edi, 2
-        add eax, 2
-        dec ebx
-        jnz tfstr_copy
-        mov word ptr [eax], 0        ; 宽终止符 00 00
-        popad
-        mov eax, [esp + 4]           ; 返回目标对象（原函数返回 eax=目标）
+        mov edx, [esp + 4]           ; 目标对象（arg1 / this）
+        ; tfstr_wide_build(obj, text, retRva)  —— 判据 + 构造 + 诊断全在 C 侧
+        push eax
+        push ecx
+        push edx
+        call tfstr_wide_build
+        add esp, 12
+        test eax, eax
+        jz  tfstr_fallback           ; 0 → 放行原逻辑（此时 EBX/ESI/EDI/EBP 仍为原值）
+        mov eax, [esp + 4]           ; 已完成构造：返回 this（与原函数 mov eax,esi 一致）
         ret
     tfstr_fallback:
         ; 重放被覆盖的 7 字节（push -1; push 修正后 handler）+ 跳回原函数+7
