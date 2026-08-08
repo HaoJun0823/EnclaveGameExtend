@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18"
+#define CJK_VERSION "v18a"
 
 #include "pch.h"
 
@@ -1715,7 +1715,9 @@ static int install_getval_hook(void)
 //     渲染缓冲的唯一必经之路。
 // ═══════════════════════════════════════════════════════════════════════
 #define MS_SUBST_CALL_RVA 0x10ABEAu     // call 0x44EA 指令地址（SubstituteKeys 内）
-#define MS_SUBST_BACK_RVA 0x10ABF6u     // 循环继续点（跳过原 lea/add 推进）
+#define MS_SUBST_BACK_RVA 0x10ABF9u     // 循环退出点（test ax,ax；★v18a：0x10ABF6→0x10ABF9，
+                                        // 预设 ax=0 使内层循环直接退出，避免 0x10ABF6 mov ax,[esi]
+                                        // 读到终止符后堆垃圾导致继续循环处理垃圾段）
 static DWORD g_substBackVA = 0;         // 运行时 = g_msBase + MS_SUBST_BACK_RVA
 static BOOL  g_hookedSubst = FALSE;
 static volatile LONG s_substCount = 0;
@@ -1729,8 +1731,9 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         ; 进入：esp→src, esp+4→0x01, esp+8→len（len 不可信，按 0 结尾扫描）
         ; ecx = 目标（调用者 mov ecx, ebp 传入）, edx = 1
         pushad                          ; 保存全部（含调用者的 ecx 目标）
-        mov  esi, [esp + 0x20]          ; esi = 源窄串（pushad 后偏移 0x20）
-        mov  edi, [esp + 0x1C]          ; edi = 原 ecx = 目标指针（pushad 存 ecx @ 0x1C）
+        ; pushad 布局：[0x00]EDI [0x04]ESI [0x08]EBP [0x0C]ESP [0x10]EBX [0x14]EDX [0x18]ECX [0x1C]EAX
+        mov  esi, [esp + 0x20]          ; esi = 源窄串（pushad 后 [esp+0x20] = 原 [esp] = 源指针）
+        mov  edi, [esp + 0x18]          ; edi = 原 ecx = 目标指针（pushad 存 ecx @ 0x18，★v18a 修正 0x1C→0x18）
         xor  ebx, ebx                   ; 已写宽字符数
     subst_loop:
         movzx eax, byte ptr [esi + ebx] ; 读窄源字节
@@ -1756,7 +1759,8 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         add  [esp + 0x04], ebx          ; 保存的 esi += N
         popad
         add  esp, 0x0C                  ; 清 3 个参数（src/0x01/len）
-        jmp  dword ptr [g_substBackVA]  ; 回 0x10ABF6 继续内层循环
+        xor  eax, eax                   ; ★v18a：ax=0 → 0x10ABF9 test ax,ax 命中 jz → 内层循环退出
+        jmp  dword ptr [g_substBackVA]  ; 回 0x10ABF9（test ax,ax，跳过 0x10ABF6 mov ax,[esi] 读垃圾）
     }
 }
 
