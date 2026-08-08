@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16k"
+#define CJK_VERSION "v16l"
 
 #include "pch.h"
 
@@ -666,10 +666,13 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
 #define IAT_GC_NARROW_RVA  0x1A72E4u   // GameClasses ?Localize_Str@@YAXPBDPAGH@Z
 // v16k：Enclave.exe（主程序）也导入全部 3 个变体（教程 HUD 直接调 Localize_Str，
 //       走 EXE 自己的 IAT → 之前从未 hook → 键名永不全角化 → "按@@@@@…"）。
-//       实测导入表：IAT_RVA 0x773B0 = CStr / 0x773B4 = narrow / 0x773B8 = wide
-#define IAT_EXE_CSTR_RVA   0x773B0u   // Enclave.exe ?Localize_Str@@YAXVCStr@@PAGH@Z
-#define IAT_EXE_NARROW_RVA 0x773B4u   // Enclave.exe ?Localize_Str@@YAXPBDPAGH@Z
-#define IAT_EXE_WIDE_RVA   0x773B8u   // Enclave.exe ?Localize_Str@@YAXPBGPAGH@Z
+// ★ v16l 修正：EXE 的 MSystem 导入描述符是【巨型列表】（~150 函数），FirstThunk=0x773B0 只是
+//   起始，第一个函数是 ?Attrib_Push@CRC_Core。v16k 误用 0x773B0/B4/B8（= Attrib_Push/VB_Precache/
+//   VB_GetVBIDInfo 的槽）→ 校验失败。精确遍历 INT 表得 Localize_Str 槽：
+//   idx=39 → 0x7744C(CStr) / idx=42 → 0x77458(narrow) / idx=43 → 0x7745C(wide)
+#define IAT_EXE_CSTR_RVA   0x7744Cu   // Enclave.exe ?Localize_Str@@YAXVCStr@@PAGH@Z
+#define IAT_EXE_NARROW_RVA 0x77458u   // Enclave.exe ?Localize_Str@@YAXPBDPAGH@Z
+#define IAT_EXE_WIDE_RVA   0x7745Cu   // Enclave.exe ?Localize_Str@@YAXPBGPAGH@Z
 
 typedef struct { DWORD lo, hi; } CStrVal;      // CStr 按值 = 8 字节
 
