@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v19"
+#define CJK_VERSION "v19a"
 
 #include "pch.h"
 
@@ -3024,10 +3024,11 @@ static BOOL install_hook(void)
             //   教程渲染用运行时 §L 名（.xrg）查 DYNAMIC → GetValue(PBD) → 返回 '键名'。
             //   post 模式：key 含 TUTORIAL_ → 返回值 data 改写（'键名' → 中文）+ 日志。
             install_getval_hook();
-            // ★ v19：hook GetValue 未命中分支窄构造 0x1000960A——修复「你拾起了」截断！
-            //   （教程 TEXT 从 LM01.xrg 读出后 GetValue 查表未命中 → 窄版 CStr 构造
-            //   → 窄格式化遇「一」00 4E 截断；宽文本检测后 jmp 宽版 0x100096BA）
-            install_getval_narrow_hook();
+            // ★ v19【已回滚】：hook GetValue 未命中分支窄构造 0x1000960A 导致死循环！
+            //   教训：0x1000960A 有 53 个调用点（通用 CStr 构造），hook 函数本体拦截
+            //   全部 CStr 构造（含加载流程）→ 无限加载死循环。且 53 调用点均不在
+            //   GetValue(0x605xx) 区域 → 教程 TEXT 根本不走 0x1000960A，推断错误。
+            // install_getval_narrow_hook();
             // ★ v18f：hook 0x10ABEA 调用点（键名'XXX'首字符判别——键名全角化，
             //   宽文本值模拟原 call 0x44EA 原样处理）。
             //   【v18f 禁用 0x44EA 本体 hook】：v18e 实测崩溃（0xC0000096 空跳转）——
