@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16m"
+#define CJK_VERSION "v16n"
 
 #include "pch.h"
 
@@ -607,7 +607,8 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
                 out[i - 1] = 0x3000;
                 continue;
             }
-            if (w >= 0x21 && w <= 0x7E) { out[i] = (WORD)(w + 0xFEE0); fixed++; }  // 半角 → 全角
+            if (w == 0x2E)              { out[i] = 0x3002;             fixed++; }  // v16n：半角点→全角句号（0xFF0E 字库无字形→@，0x3002 确定有）
+            else if (w >= 0x21 && w <= 0x7E) { out[i] = (WORD)(w + 0xFEE0); fixed++; }  // 半角 → 全角
             else if (w == 0x20)         { out[i] = 0x3000;             fixed++; }  // 半角空格 → 全角
             i++;
         }
@@ -619,11 +620,21 @@ static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr, DWORD cal
         //   若教程提示不走本点，这份日志会是空的 —— 那就直接锁定"要改 hook 点"。
         if ((hasAscii || hasCjk) && (hasNl || post_quota(callerRva, 0)))
         {
-            char buf[1152];
+            // v16n：内容去重 —— 主菜单「新建游戏」每帧同内容会刷爆 caller 配额，
+            //       同指纹（caller + 前 8 WORD）只记一次，让真实字幕/教程有配额
+            static DWORD s_fp[48];
+            static LONG  s_fpn = 0;
+            DWORD fp = callerRva;
+            for (int k = 0; k < 8 && k < i; k++) fp = fp * 31 + out[k];
+            int dup = 0;
+            for (int k = 0; k < s_fpn; k++) if (s_fp[k] == fp) { dup = 1; break; }
+            if (dup) return;
+            if (s_fpn < 48) s_fp[s_fpn++] = fp;
+            char buf[1452];
             char* p = buf;
             p += wsprintfA(p, "[POST %ld] caller=%05X out=%08X len=%d fixed=%d nl=%d cap=%d\n",
                            n, callerRva, outPtr, i, fixed, hasNl, cap);
-            for (int k = 0; k < 160 && k < i; k++)
+            for (int k = 0; k < 200 && k < i; k++)
                 p += wsprintfA(p, "%04X ", (unsigned)out[k]);
             p += wsprintfA(p, "\n");
             HANDLE h = CreateFileA("CJK_post_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
@@ -1535,16 +1546,24 @@ static BOOL g_hookedDrawLen = FALSE;
 
 // head[] = 绘制现场缓冲的头 10 字节。这是判定「是否还存在第 5 个截断点」的关键证据：
 //   期望看到 A7 5A 32 32 开头（窄前缀 §Z22），紧跟正文的 UTF-16 码元。
-static void h5_diag(DWORD retRva, int found, int slen, const BYTE* head)
+// v16n：改为记录 data 前 64 字节（窄字节），区间外绘制（教程/UI）也可见
+static void h5_diag(DWORD retRva, int found, int slen, const BYTE* data)
 {
     static volatile LONG s_c = 0;
-    char buf[224];
-    if (InterlockedIncrement(&s_c) > 24) return;
-    wsprintfA(buf, "[H5] ret=%05X len=%3d strlen=%3d %-7s | %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
-              retRva, found, slen,
-              found > 0 ? (found > slen ? "RESCUED" : "same") : "miss",
-              head[0], head[1], head[2], head[3], head[4],
-              head[5], head[6], head[7], head[8], head[9]);
+    char buf[340];
+    char* p;
+    int i;
+    if (InterlockedIncrement(&s_c) > 100) return;
+    p = buf;
+    p += wsprintfA(p, "[H5] ret=%05X len=%3d strlen=%3d %-7s | ", retRva, found, slen,
+                   found > 0 ? "RESCUED" : "miss");
+    __try
+    {
+        for (i = 0; i < 64 && data[i]; i++)
+            p += wsprintfA(p, "%02X ", data[i]);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+    p += wsprintfA(p, "\r\n");
     diag_write(buf);
 }
 
@@ -1567,7 +1586,9 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 
-    h5_diag(retRva, len, slen, head);
+    h5_diag(retRva, len, slen, (const BYTE*)data);
+    // v16n：区间外（教程/UI 绘制）只记录不接管 —— 防止误改非字幕文本长度
+    if (retRva < SUB_LO || retRva > SUB_HI) return 0;
     // 只有「查到的长度比 strlen 更长」才值得接管；否则一切照旧，零风险
     return (len > slen && len <= LEN_MAXB) ? len : 0;
 }
@@ -1582,11 +1603,7 @@ static void __declspec(naked) cjk_draw_len_trampoline_impl(void)
         pushad
 
         mov ecx, [esp + 0x38]
-        sub ecx, g_gwBase
-        cmp ecx, SUB_LO
-        jb  h5_orig
-        cmp ecx, SUB_HI
-        ja  h5_orig
+        sub ecx, g_gwBase               ; v16n：去掉区间过滤 —— 区间外（教程/UI）只记录不接管
 
         push ecx                        ; retRva
         push eax                        ; data
