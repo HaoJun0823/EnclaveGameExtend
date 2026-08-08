@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v19a"
+#define CJK_VERSION "v20"
 
 #include "pch.h"
 
@@ -1717,83 +1717,85 @@ static int install_getval_hook(void)
 //     → 宽文本：jmp 到宽版 0x100096BA（参数原样，宽版自己 SEH+ret）
 //     → 其他：jmp trampoline（原 6B + jmp 0x10009610）走原逻辑
 // ═══════════════════════════════════════════════════════════════════════
-#define MS_GETVAL_NARROW_RVA 0x960Au    // GetValue 未命中分支窄版 CStr 构造
+#define MS_GETVAL_CALL_RVA 0x60615u     // GetValue 未命中分支 call 0x1000960A 调用点（唯一！）
+#define MS_GETVAL_CALL_RET_RVA 0x6061Au // call 返回地址（add esp,0x08 前）
+#define MS_GETVAL_NARROW_RVA 0x960Au    // 窄版 CStr 构造（原函数，未修改）
 #define MS_GETVAL_WIDE_RVA   0x96BAu    // 宽版 CStr 构造（WORD 扫，不截断）
-#define GETVALNARROW_HDR_BYTES 6
-static BYTE  g_origGetValNarrow[GETVALNARROW_HDR_BYTES];
-static void* g_getvalNarrowTramp = NULL;
-static DWORD g_getvalNarrowWideVA = 0;   // 运行时宽版地址（MSystem base + 0x96BA）
-static BOOL  g_hookedGetValNarrow = FALSE;
+#define GETVALCALL_HDR_BYTES 5
+static BYTE  g_origGetValCall[GETVALCALL_HDR_BYTES];
+static DWORD g_getvalRetVA = 0;          // 运行时 call 返回地址（base+0x6061A）
+static DWORD g_getvalNarrowVA = 0;       // 运行时窄版地址（base+0x960A）
+static DWORD g_getvalWideVA = 0;         // 运行时宽版地址（base+0x96BA）
+static BOOL  g_hookedGetValCall = FALSE;
 
-// v19 handler：hook 0x1000960A 入口（jmp 进入，无返回地址）
-// 进入：esp → 原返回地址, [esp+4]=arg1(输出CStr*), [esp+8]=arg2(源指针)
-static void __declspec(naked) cjk_getval_narrow_impl(void)
+// v20 handler：hook GetValue 未命中分支的 call 0x1000960A 调用点（0x10060615）
+// 进入（jmp 替换 call，无返回地址压栈）：[esp]=arg1(输出CStr*), [esp+4]=arg2(源指针)
+// 检测源是 UTF-16 宽文本 → 模拟 call 跳到【宽版 0x100096BA】（完整，不截断）
+// 其他 → 模拟 call 跳到【原版 0x1000960A】（行为不变）
+static void __declspec(naked) cjk_getval_call_impl(void)
 {
     __asm
     {
-        ; 源 = [esp+8]
-        mov  eax, [esp + 8]
+        ; arg2 = 源指针 = [esp+4]
+        mov  eax, [esp + 4]
         test eax, eax
-        jz   gn_orig            ; 空源 → 原逻辑
+        jz   gvc_orig            ; 空源 → 原版
         ; 扫描前 16 WORD（32 字节）：偶数偏移字节 == 0 && 下一字节非 0 → UTF-16 宽文本
         xor  ecx, ecx
-    gn_scan:
+    gvc_scan:
         cmp  ecx, 16
-        jae  gn_orig            ; 无特征 → 窄 → 原逻辑
+        jae  gvc_orig            ; 无特征 → 窄 → 原版
         movzx edx, byte ptr [eax + ecx*2]
         test edx, edx
-        jnz  gn_next            ; 偶数偏移非 0 → 下一个
+        jnz  gvc_next            ; 偶数偏移非 0 → 下一个
         movzx edx, byte ptr [eax + ecx*2 + 1]
         test edx, edx
-        jnz  gn_wide            ; ★ 偶数0 + 后非0 → 宽文本（如「一」00 4E、全角空格 00 30）
-    gn_next:
+        jnz  gvc_wide            ; ★ 偶数0 + 后非0 → 宽文本（如「一」00 4E、全角空格 00 30）
+    gvc_next:
         inc  ecx
-        jmp  gn_scan
-    gn_wide:
-        ; ★ 宽文本 → jmp 宽版 0x100096BA（参数原样：esp→返回地址, [esp+4]=this, [esp+8]=源）
-        jmp  dword ptr [g_getvalNarrowWideVA]
-    gn_orig:
-        ; trampoline：原 6B（mov eax,fs:[0]）+ jmp 0x10009610
-        jmp  dword ptr [g_getvalNarrowTramp]
+        jmp  gvc_scan
+    gvc_wide:
+        ; ★ 宽文本 → 模拟 call 宽版 0x100096BA（push 返回地址 + jmp）
+        push dword ptr [g_getvalRetVA]
+        jmp  dword ptr [g_getvalWideVA]
+    gvc_orig:
+        ; 窄/空 → 模拟 call 原版 0x1000960A（push 返回地址 + jmp）
+        push dword ptr [g_getvalRetVA]
+        jmp  dword ptr [g_getvalNarrowVA]
     }
 }
 
-static int install_getval_narrow_hook(void)
+static int install_getval_call_hook(void)
 {
     BYTE* entry;
     DWORD oldProt;
     HMODULE hMs;
     int i;
-    static const BYTE expect[GETVALNARROW_HDR_BYTES] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00};
-    if (g_hookedGetValNarrow) return 1;
+    static const BYTE expect[GETVALCALL_HDR_BYTES] = {0xE8, 0xF0, 0x8F, 0xFA, 0xFF};
+    if (g_hookedGetValCall) return 1;
     hMs = GetModuleHandleA("MSystem.dll");
     if (!hMs) return 0;
-    entry = (BYTE*)hMs + MS_GETVAL_NARROW_RVA;
-    memcpy(g_origGetValNarrow, entry, GETVALNARROW_HDR_BYTES);
-    for (i = 0; i < GETVALNARROW_HDR_BYTES; i++)
-        if (g_origGetValNarrow[i] != expect[i])
+    entry = (BYTE*)hMs + MS_GETVAL_CALL_RVA;
+    memcpy(g_origGetValCall, entry, GETVALCALL_HDR_BYTES);
+    for (i = 0; i < GETVALCALL_HDR_BYTES; i++)
+        if (g_origGetValCall[i] != expect[i])
         {
-            log_msg("[CJK] v19 0x1000960A 头核验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
-                    g_origGetValNarrow[0], g_origGetValNarrow[1], g_origGetValNarrow[2],
-                    g_origGetValNarrow[3], g_origGetValNarrow[4], g_origGetValNarrow[5]);
+            log_msg("[CJK] v20 调用点核验失败：%02X %02X %02X %02X %02X，跳过\n",
+                    g_origGetValCall[0], g_origGetValCall[1], g_origGetValCall[2],
+                    g_origGetValCall[3], g_origGetValCall[4]);
             return 0;
         }
-    g_getvalNarrowWideVA = (DWORD)hMs + MS_GETVAL_WIDE_RVA;
-    // trampoline：原 6B + jmp entry+6
-    g_getvalNarrowTramp = VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    if (!g_getvalNarrowTramp) return 0;
-    memcpy(g_getvalNarrowTramp, g_origGetValNarrow, GETVALNARROW_HDR_BYTES);
-    ((BYTE*)g_getvalNarrowTramp)[GETVALNARROW_HDR_BYTES] = 0xE9;
-    *(DWORD*)((BYTE*)g_getvalNarrowTramp + GETVALNARROW_HDR_BYTES + 1) =
-        ((DWORD)entry + GETVALNARROW_HDR_BYTES) - ((DWORD)g_getvalNarrowTramp + GETVALNARROW_HDR_BYTES + 5);
-    if (!VirtualProtect(entry, GETVALNARROW_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    g_getvalRetVA    = (DWORD)hMs + MS_GETVAL_CALL_RET_RVA;
+    g_getvalNarrowVA = (DWORD)hMs + MS_GETVAL_NARROW_RVA;
+    g_getvalWideVA   = (DWORD)hMs + MS_GETVAL_WIDE_RVA;
+    if (!VirtualProtect(entry, GETVALCALL_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
     entry[0] = 0xE9;
-    *(DWORD*)(entry + 1) = (DWORD)cjk_getval_narrow_impl - ((DWORD)entry + 5);
-    VirtualProtect(entry, GETVALNARROW_HDR_BYTES, oldProt, &oldProt);
-    FlushInstructionCache(GetCurrentProcess(), entry, GETVALNARROW_HDR_BYTES);
-    g_hookedGetValNarrow = TRUE;
-    log_msg("[CJK] v19 0x1000960A 窄构造 hook：%08X -> %08X（宽文本 jmp 宽版 %08X）\n",
-            (DWORD)entry, (DWORD)cjk_getval_narrow_impl, g_getvalNarrowWideVA);
+    *(DWORD*)(entry + 1) = (DWORD)cjk_getval_call_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, GETVALCALL_HDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, GETVALCALL_HDR_BYTES);
+    g_hookedGetValCall = TRUE;
+    log_msg("[CJK] v20 GetValue未命中调用点 hook：%08X -> %08X（宽->%08X 窄->%08X ret=%08X）\n",
+            (DWORD)entry, (DWORD)cjk_getval_call_impl, g_getvalWideVA, g_getvalNarrowVA, g_getvalRetVA);
     return 1;
 }
 
@@ -3024,11 +3026,12 @@ static BOOL install_hook(void)
             //   教程渲染用运行时 §L 名（.xrg）查 DYNAMIC → GetValue(PBD) → 返回 '键名'。
             //   post 模式：key 含 TUTORIAL_ → 返回值 data 改写（'键名' → 中文）+ 日志。
             install_getval_hook();
-            // ★ v19【已回滚】：hook GetValue 未命中分支窄构造 0x1000960A 导致死循环！
-            //   教训：0x1000960A 有 53 个调用点（通用 CStr 构造），hook 函数本体拦截
-            //   全部 CStr 构造（含加载流程）→ 无限加载死循环。且 53 调用点均不在
-            //   GetValue(0x605xx) 区域 → 教程 TEXT 根本不走 0x1000960A，推断错误。
-            // install_getval_narrow_hook();
+            // ★ v20：hook GetValue 未命中分支【调用点】0x10060615（call 0x1000960A）
+            //   ——修复「你拾起了一支火把」→「你拾起了」（低字节 0x00 汉字截断）！
+            //   关键修正 vs v19：v19 hook 0x1000960A 函数本体（53 个调用点全拦）
+            //   → 死循环；v20 只 hook GetValue 未命中这一处调用点（影响面最小），
+            //   检测源是 UTF-16 宽文本 → 模拟 call 跳宽版 0x100096BA（WORD 扫不截断）。
+            install_getval_call_hook();
             // ★ v18f：hook 0x10ABEA 调用点（键名'XXX'首字符判别——键名全角化，
             //   宽文本值模拟原 call 0x44EA 原样处理）。
             //   【v18f 禁用 0x44EA 本体 hook】：v18e 实测崩溃（0xC0000096 空跳转）——
