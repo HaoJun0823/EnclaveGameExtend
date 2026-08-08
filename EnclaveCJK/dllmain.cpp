@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18a"
+#define CJK_VERSION "v18b"
 
 #include "pch.h"
 
@@ -1724,42 +1724,86 @@ static volatile LONG s_substCount = 0;
 
 // v18 handler：进入时栈 [src, 0x01, len]，ecx=目标(窄指针)，edx=1
 // （jmp 替换 call，无返回地址；栈上 3 参数由本 handler 清理）
+// ★ v18b 关键修正：调用者原逻辑推进 = 2*len（lea eax,[edi+edi]; add ebp,eax），
+//   与 0x44EA 实际写入数无关！v18a 用「实际字符数 N」推进 → 目标指针错位
+//   → 主循环后续文本段全部错位 → 【所有文字乱码】。v18b 推进 = 2*len 保持一致，
+//   并写满 len 个宽字符（转换字符 + 全角空格填充），杜绝缓冲空洞。
 static void __declspec(naked) cjk_subst_key_impl(void)
 {
     __asm
     {
-        ; 进入：esp→src, esp+4→0x01, esp+8→len（len 不可信，按 0 结尾扫描）
+        ; 进入：esp→src, esp+4→0x01, esp+8→len(v14)
         ; ecx = 目标（调用者 mov ecx, ebp 传入）, edx = 1
         pushad                          ; 保存全部（含调用者的 ecx 目标）
         ; pushad 布局：[0x00]EDI [0x04]ESI [0x08]EBP [0x0C]ESP [0x10]EBX [0x14]EDX [0x18]ECX [0x1C]EAX
-        mov  esi, [esp + 0x20]          ; esi = 源窄串（pushad 后 [esp+0x20] = 原 [esp] = 源指针）
-        mov  edi, [esp + 0x18]          ; edi = 原 ecx = 目标指针（pushad 存 ecx @ 0x18，★v18a 修正 0x1C→0x18）
-        xor  ebx, ebx                   ; 已写宽字符数
-    subst_loop:
-        movzx eax, byte ptr [esi + ebx] ; 读窄源字节
+        ; 栈参数（pushad 前）：[0x20]=src [0x24]=0x01(源宽标志) [0x28]=len(v14)
+        mov  esi, [esp + 0x20]          ; esi = 源
+        mov  edi, [esp + 0x18]          ; edi = 原 ecx = 目标指针
+        mov  ebx, [esp + 0x28]          ; ebx = len(v14)：推进量与写满数
+        ; 判源宽窄：宽串 ASCII 高字节为 0（[esi+1]==0）
+        movzx eax, byte ptr [esi + 1]
         test eax, eax
-        jz   subst_done
+        jnz  src_narrow
+        ; ── 宽源路径：逐宽字符（ASCII 全角化，汉字原样）──
+        xor  edx, edx                   ; 源偏移（宽字符）
+    wide_loop:
+        test ebx, ebx                   ; 剩余目标数
+        jz   subst_finish
+        movzx eax, word ptr [esi + edx*2]
+        test eax, eax
+        jz   wide_fill                  ; 源 NUL → 空格填充
         cmp  eax, 0x20
-        jb   subst_raw
+        jb   wide_raw
         cmp  eax, 0x7E
-        ja   subst_raw
+        ja   wide_raw
         add  eax, 0xFEE0                ; 半角 0x20-0x7E → 全角（0xFF00-0xFF5E）
-    subst_raw:
-        mov  [edi + ebx*2], ax          ; 写宽字符（每字符 2 字节）
-        inc  ebx
-        cmp  ebx, 64                    ; 安全上限（防越界）
-        jb   subst_loop
-    subst_done:
-        ; ebx = 实际写入宽字符数 N
-        ; 修正 pushad 保存区：ebp(v4目标) += 2*N, esi(v8源) += N
-        ; pushad 布局: [0x00]edi [0x04]esi [0x08]ebp [0x0C]esp [0x10]ebx [0x14]edx [0x18]ecx [0x1C]eax
-        mov  eax, ebx
-        shl  eax, 1
-        add  [esp + 0x08], eax          ; 保存的 ebp += 2*N
-        add  [esp + 0x04], ebx          ; 保存的 esi += N
+    wide_raw:
+        mov  [edi], ax
+        add  edi, 2
+        inc  edx
+        dec  ebx
+        jmp  wide_loop
+    wide_fill:
+        mov  word ptr [edi], 0x3000     ; 全角空格填充
+        add  edi, 2
+        dec  ebx
+        jnz  wide_fill
+        jmp  subst_finish
+        ; ── 窄源路径：逐字节（全部 ASCII → 全角化）──
+    src_narrow:
+        xor  edx, edx                   ; 源偏移（字节）
+    narrow_loop:
+        test ebx, ebx
+        jz   subst_finish
+        movzx eax, byte ptr [esi + edx]
+        test eax, eax
+        jz   narrow_fill
+        cmp  eax, 0x20
+        jb   narrow_raw
+        cmp  eax, 0x7E
+        ja   narrow_raw
+        add  eax, 0xFEE0
+    narrow_raw:
+        mov  [edi], ax
+        add  edi, 2
+        inc  edx
+        dec  ebx
+        jmp  narrow_loop
+    narrow_fill:
+        mov  word ptr [edi], 0x3000     ; 全角空格填充
+        add  edi, 2
+        dec  ebx
+        jnz  narrow_fill
+    subst_finish:
+        ; ★ v18b：ebp/esi 推进 = 2*len（与原逻辑 lea eax,[edi+edi]; add ebp,eax 完全一致）
+        ;   → 主循环目标指针不错位 → 后续文本段正常！
+        mov  eax, [esp + 0x28]          ; len(v14)
+        shl  eax, 1                     ; 2*len
+        add  [esp + 0x08], eax          ; 保存的 EBP += 2*len
+        add  [esp + 0x04], eax          ; 保存的 ESI += 2*len
         popad
         add  esp, 0x0C                  ; 清 3 个参数（src/0x01/len）
-        xor  eax, eax                   ; ★v18a：ax=0 → 0x10ABF9 test ax,ax 命中 jz → 内层循环退出
+        xor  eax, eax                   ; ax=0 → 0x10ABF9 test ax,ax 命中 jz → 内层循环退出
         jmp  dword ptr [g_substBackVA]  ; 回 0x10ABF9（test ax,ax，跳过 0x10ABF6 mov ax,[esi] 读垃圾）
     }
 }
