@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16s"
+#define CJK_VERSION "v16t"
 
 #include "pch.h"
 
@@ -1239,6 +1239,131 @@ static int install_findkey_hook(void)
     return 1;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v16t：hook CImage::Write（MSystem RVA 0x3DE10）——文本绘制的最终出口！
+//   __thiscall Write(CImage* this, CRct rect(16B), const CStr& text)
+//   text（CStr*）= [esp+0x14]（入口处）。函数头 = mov eax, fs:0（64 A1 00 00 00 00，6 字节）。
+//   前置处理（不改返回地址）：hook_impl 里先全角化 text 数据（safe_fullwidth_expanded），
+//   再 jmp trampoline 执行原函数 → 覆盖字幕/教程/UI 所有文本绘制（含教程缓冲！）。
+// ═══════════════════════════════════════════════════════════════════════
+#define MS_CIMAGE_WRITE_RVA 0x3DE10u
+#define DRAWHDR_BYTES 6
+static BYTE  g_origDrawBody[DRAWHDR_BYTES];
+static void* g_drawTramp = NULL;
+static BOOL  g_hookedDraw = FALSE;
+static DWORD g_drawOrigRet = 0;
+
+// 记录含中文（>0x7F 字节）的绘制文本前 32 WORD → CJK_draw2_log.txt（配额 300）
+static void draw_log2(const WORD* data)
+{
+    static volatile LONG s_c = 0;
+    LONG n;
+    int i, hasHi = 0, hasAscii = 0;
+    char sb[900], *p;
+    if (!data) return;
+    __try
+    {
+        for (i = 0; i < 128 && data[i]; i++)
+        {
+            if (data[i] >= 0x100 || (data[i] >= 0x80 && data[i] < 0x100)) { hasHi = 1; break; }
+            if (data[i] >= 0x21 && data[i] <= 0x7E) hasAscii = 1;
+        }
+        if (!hasHi) return;   // 纯 ASCII 资源名/路径不记录
+        n = InterlockedIncrement(&s_c);
+        if (n > 300) return;
+        p = sb;
+        p += wsprintfA(p, "[DRAW2 %ld] caller=%08X | ", n, g_drawOrigRet - g_msBase);
+        for (i = 0; i < 32; i++)
+            p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+        p += wsprintfA(p, "\n");
+        {
+            HANDLE h = CreateFileA("CJK_draw2_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                   NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (h != INVALID_HANDLE_VALUE)
+            {
+                SetFilePointer(h, 0, NULL, FILE_END);
+                DWORD wn; WriteFile(h, sb, (DWORD)(p - sb), &wn, NULL);
+                CloseHandle(h);
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+// 前置处理：全角化 text（CStr*）数据 + 记录
+static void __cdecl cjk_draw_pre(DWORD textPtr)
+{
+    WORD* data;
+    if (!textPtr) return;
+    __try
+    {
+        data = *(WORD**)(textPtr + 4);
+        if (!data || data == (WORD*)-2) return;
+        // data = [标志/窄前缀][UTF-16 正文…] → safe_fullwidth_expanded 从 data 起（§ 跳过逻辑处理前缀）
+        safe_fullwidth_expanded((DWORD)data, g_drawOrigRet - g_msBase, 1024);
+        draw_log2(data);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+static void __declspec(naked) cjk_draw_hook_impl(void)
+{
+    __asm
+    {
+        ; 进入：栈 [ret, rect0..3, text(CStr*)]
+        pushad
+        mov  eax, [esp + 0x34]                   ; text（CStr*）
+        mov  ecx, [esp + 0x20]                   ; ret（原调用者）
+        mov  g_drawOrigRet, ecx
+        test eax, eax
+        jz   skip
+        push eax
+        call cjk_draw_pre
+        add  esp, 4
+skip:
+        popad
+        jmp  dword ptr [g_drawTramp]             ; 原 6 字节 + jmp 原函数+6
+    }
+}
+
+static int install_draw_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMs;
+    int i;
+    static const BYTE expect[DRAWHDR_BYTES] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00};
+    if (g_hookedDraw) return 1;
+    hMs = GetModuleHandleA("MSystem.dll");
+    if (!hMs) return 0;
+    entry = (BYTE*)(hMs + MS_CIMAGE_WRITE_RVA);
+    memcpy(g_origDrawBody, entry, DRAWHDR_BYTES);
+    for (i = 0; i < DRAWHDR_BYTES; i++)
+        if (g_origDrawBody[i] != expect[i])
+        {
+            log_msg("[CJK] CImage::Write 落点核验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+                    g_origDrawBody[0], g_origDrawBody[1], g_origDrawBody[2],
+                    g_origDrawBody[3], g_origDrawBody[4], g_origDrawBody[5]);
+            return 0;
+        }
+    g_drawTramp = VirtualAlloc(NULL, 20, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_drawTramp) return 0;
+    memcpy(g_drawTramp, g_origDrawBody, DRAWHDR_BYTES);
+    ((BYTE*)g_drawTramp)[DRAWHDR_BYTES] = 0xE9;
+    *(DWORD*)((BYTE*)g_drawTramp + DRAWHDR_BYTES + 1) =
+        ((DWORD)entry + DRAWHDR_BYTES) - ((DWORD)g_drawTramp + DRAWHDR_BYTES + 5);
+    if (!VirtualProtect(entry, DRAWHDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_draw_hook_impl - ((DWORD)entry + 5);
+    entry[5] = 0x90;
+    VirtualProtect(entry, DRAWHDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, DRAWHDR_BYTES);
+    g_hookedDraw = TRUE;
+    log_msg("[CJK] v16t CImage::Write 本体 hook：%08X -> %08X（文本绘制出口，前置全角化）\n",
+            (DWORD)entry, (DWORD)cjk_draw_hook_impl);
+    return 1;
+}
+
 // 改写一个 IAT 槽：校验通过才写。返回 1 = 成功
 static int iat_hook_one(DWORD modBase, DWORD iatRva, FARPROC expected,
                         void* newFunc, void** pOrig, const char* tag)
@@ -2068,6 +2193,8 @@ static BOOL install_hook(void)
             install_wide_body_hook();
             // ★ v16q：hook Localize_FindKeyValue 本体（教程 §L 键名查表点 → 键名汉字映射）
             install_findkey_hook();
+            // ★ v16t：hook CImage::Write 本体（文本绘制出口，前置全角化 → 覆盖教程/字幕/UI）
+            install_draw_hook();
 
             FARPROC pC = GetProcAddress(hMs, "?Localize_Str@@YAXVCStr@@PAGH@Z");
             FARPROC pN = GetProcAddress(hMs, "?Localize_Str@@YAXPBDPAGH@Z");
