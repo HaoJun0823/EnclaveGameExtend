@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v17b"
+#define CJK_VERSION "v17c"
 
 #include "pch.h"
 
@@ -1425,15 +1425,24 @@ static BYTE  g_origSetKeyBody[SETKEY_HDR_BYTES];
 static void* g_setKeyTramp = NULL;
 static BOOL  g_hookedSetKey = FALSE;
 
-// 前置只读记录：key + value CStr 数据快照
-static void __cdecl cjk_setkey_pre_c(DWORD valueLo, const char* key)
+// 前置只读记录：key + value CStr 数据快照 + 进入时原始栈（v17c 定案栈布局）
+// r0=ret, r1=key, r2=valueLo, r3=valueHi（hook_impl 从 pushad 后 [esp+0x24..0x30] 取）
+static void __cdecl cjk_setkey_pre_c(DWORD valueLo, const char* key,
+                                     DWORD r0, DWORD r1, DWORD r2, DWORD r3)
 {
     static volatile LONG s_n = 0;
-    char sb[700], *p;
+    static CRITICAL_SECTION s_cs;
+    static BOOL s_csInit = FALSE;
+    char sb[900], *p;
     WORD* data;
     LONG n;
     int i;
     if (!key) return;
+    if (!s_csInit)
+    {
+        InitializeCriticalSection(&s_cs);
+        s_csInit = TRUE;
+    }
     __try
     {
         data = *(WORD**)(valueLo + 4);
@@ -1451,10 +1460,11 @@ static void __cdecl cjk_setkey_pre_c(DWORD valueLo, const char* key)
                 for (i = 0; i < kl; i++)
                     p += wsprintfA(p, "%c", (k[i] >= 0x20 && k[i] < 0x7F) ? k[i] : '.');
             }
-            p += wsprintfA(p, " out=%08X | ", valueLo);
+            p += wsprintfA(p, " raw=[%08X %08X %08X %08X] out=%08X | ", r0, r1, r2, r3, valueLo);
             for (i = 0; i < 24; i++)
                 p += wsprintfA(p, "%04X ", (unsigned)data[i]);
             p += wsprintfA(p, "\n");
+            EnterCriticalSection(&s_cs);
             {
                 HANDLE h = CreateFileA("CJK_setkey_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
                                        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -1465,28 +1475,37 @@ static void __cdecl cjk_setkey_pre_c(DWORD valueLo, const char* key)
                     CloseHandle(h);
                 }
             }
+            LeaveCriticalSection(&s_cs);
         }
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { }
 }
 
-// 前置：取 key（[esp+0x28]）+ value.lo（[esp+0x2C]）→ pre_c → jmp trampoline（this 留在 ecx）
+// 前置：取 key（[esp+0x28]）+ value.lo（[esp+0x2C]）+ 原始栈 4 dword → pre_c → jmp trampoline
 static void __declspec(naked) cjk_setkey_hook_impl(void)
 {
     __asm
     {
-        ; 进入：栈 [ret, key, value.lo, value.hi]，this = ecx（__thiscall！）
+        ; 进入：栈 [ret, key, value.lo, value.hi, ...]，this = ecx（__thiscall！）
         push ebp
         mov  ebp, esp
         pushad
         ; push ebp(4) + pushad(32) = 36 = 0x24
-        ; [esp+0x24] = ret, [esp+0x28] = key, [esp+0x2C] = value.lo
-        mov  eax, [esp + 0x28]           ; key
-        mov  ecx, [esp + 0x2C]           ; value.lo（CStr 结构起始）
-        push ecx
-        push eax
+        ; [esp+0x24] = ret, [esp+0x28] = key, [esp+0x2C] = value.lo, [esp+0x30] = value.hi
+        ; 先取到寄存器（避免 push 改变 esp 偏移）：
+        mov  eax, [esp + 0x24]           ; r0 = ret
+        mov  ecx, [esp + 0x28]           ; r1 = key
+        mov  edx, [esp + 0x2C]           ; r2 = value.lo
+        mov  esi, [esp + 0x30]           ; r3 = value.hi
+        ; __cdecl 从右往左压：r3, r2, r1, r0, key, valueLo
+        push esi                         ; r3
+        push edx                         ; r2
+        push ecx                         ; r1
+        push eax                         ; r0
+        push ecx                         ; key（= r1）
+        push edx                         ; valueLo（= r2）
         call cjk_setkey_pre_c
-        add  esp, 8
+        add  esp, 24                     ; 6 个参数清栈
         popad
         pop  ebp
         jmp  dword ptr [g_setKeyTramp]   ; 执行原函数（popad 已恢复 ecx = this）
