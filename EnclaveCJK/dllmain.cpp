@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16v"
+#define CJK_VERSION "v16w"
 
 #include "pch.h"
 
@@ -1003,8 +1003,8 @@ static const WORD W_KEY_G[]       = {0x5207,0x6362,0x89C6,0x89D2,0x952E,0};  // 
 
 typedef struct { const char* name; const WORD* repl; } KeyMapEntry;
 static const KeyMapEntry KEY_MAP[] = {
-    {"MOUSE1", W_MOUSE_LEFT}, {"MOUSEBTN1", W_MOUSE_LEFT}, {"MOUSE_LEFT", W_MOUSE_LEFT}, {"LMOUSE", W_MOUSE_LEFT},
-    {"MOUSE2", W_MOUSE_RIGHT}, {"MOUSEBTN2", W_MOUSE_RIGHT}, {"MOUSE_RIGHT", W_MOUSE_RIGHT}, {"RMOUSE", W_MOUSE_RIGHT},
+    {"MOUSE1", W_MOUSE_LEFT}, {"MOUSEBTN1", W_MOUSE_LEFT}, {"MOUSEBUTTON1", W_MOUSE_LEFT}, {"MOUSE_LEFT", W_MOUSE_LEFT}, {"LMOUSE", W_MOUSE_LEFT},
+    {"MOUSE2", W_MOUSE_RIGHT}, {"MOUSEBTN2", W_MOUSE_RIGHT}, {"MOUSEBUTTON2", W_MOUSE_RIGHT}, {"MOUSE_RIGHT", W_MOUSE_RIGHT}, {"RMOUSE", W_MOUSE_RIGHT},
     {"SPACE", W_SPACE}, {"SPACEBAR", W_SPACE},
     {"SHIFT", W_SHIFT}, {"LSHIFT", W_SHIFT}, {"RSHIFT", W_SHIFT},
     {"CTRL", W_CTRL}, {"CONTROL", W_CTRL}, {"LCONTROL", W_CTRL}, {"RCONTROL", W_CTRL},
@@ -1078,6 +1078,27 @@ static void key_replace(WORD* t, int maxw)
                 i = newstart + rlen;
                 continue;
             }
+            // ★ v16w：未命中映射但被引号包裹（= 键名，如 'MOUSEBUTTON1'）→
+            //   剥引号 + 全角化（半角字母数字 +0xFEE0 → 全角，等长原地转换）。
+            //   新字库（GB2312 全字符集）A3 区有全角字母数字字形（v16u 的 ′ 实证）。
+            if (strip_lead || strip_trail)
+            {
+                int newstart = i - strip_lead;
+                int oldend = j + strip_trail;
+                int total = 0, q;
+                while (t[total]) total++;
+                if (oldend <= total)
+                    memmove(t + newstart, t + oldend,
+                            (total + 1 - oldend) * sizeof(WORD));
+                for (q = 0; q < tl && q < maxw - newstart; q++)
+                {
+                    WORD c = t[newstart + q];
+                    if (c >= 0x21 && c <= 0x7E)
+                        t[newstart + q] = (WORD)(c + 0xFEE0);   // 半角 → 全角
+                }
+                i = newstart + tl;
+                continue;
+            }
             i = j;
         }
         else
@@ -1090,12 +1111,14 @@ static void key_replace(WORD* t, int maxw)
 // post：原函数 ret 后被跳入。栈 [a1, a2]（__cdecl，调用者未清栈）。
 static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
 {
+    static char s_keySeen[64][40];
+    static int  s_keySeenN = 0;
     static volatile LONG s_n = 0;
     char sb[900], *p;
     WORD* data;
     const char* k;
     LONG n;
-    int i, kl;
+    int i, kl, seenCnt;
     if (!a1) return;
     __try
     {
@@ -1105,10 +1128,26 @@ static void __cdecl cjk_findkey_post_c(DWORD a1, DWORD a2)
         kl = 0;
         __try { while (k[kl] && kl < 40) kl++; }
         __except (EXCEPTION_EXECUTE_HANDLER) { kl = 0; }
-        // ★ v16v：前 300 条全记录（去掉 v16s 按 key 去重——「单键」出现但 TUTORIAL key 未记录，
-        //   怀疑去重/配额误伤，全量记录保教程调用可见）
+        // ★ v16w：per-key 配额——每个 key 最多记 3 次（替换前/后配对）。
+        //   v16v 全局 300 条被加载界面 STD_LOADING（每帧查表）刷爆 → 教程（游戏内）的
+        //   FindKeyValue 调用被配额掩盖 → 「教程不走 FindKeyValue」结论不可靠。
+        //   按 key 计数，同 key 第 4 次起跳过 → STD_LOADING 只占 3 条，TUTORIAL_* 必可记录。
+        seenCnt = 0;
+        for (i = 0; i < s_keySeenN && i < 64; i++)
+            if (key_eq(s_keySeen[i], k))
+            {
+                seenCnt++;
+                if (seenCnt >= 3) return;
+            }
+        if (s_keySeenN < 64)
+        {
+            int cp = kl < 39 ? kl : 39;
+            for (i = 0; i < cp; i++) s_keySeen[s_keySeenN][i] = k[i];
+            s_keySeen[s_keySeenN][cp] = 0;
+            s_keySeenN++;
+        }
         n = InterlockedIncrement(&s_n);
-        if (n > 300) return;
+        if (n > 400) return;
         // 替换前 dump
         p = sb;
         p += wsprintfA(p, "[KEY %ld] caller=%08X key=", n, g_keyCaller - g_msBase);
