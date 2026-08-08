@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16t"
+#define CJK_VERSION "v16u"
 
 #include "pch.h"
 
@@ -1331,17 +1331,26 @@ static int install_draw_hook(void)
     BYTE* entry;
     DWORD oldProt;
     HMODULE hMs;
+    FARPROC pW;
     int i;
     static const BYTE expect[DRAWHDR_BYTES] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00};
     if (g_hookedDraw) return 1;
     hMs = GetModuleHandleA("MSystem.dll");
     if (!hMs) return 0;
-    entry = (BYTE*)(hMs + MS_CIMAGE_WRITE_RVA);
+    // ★ v16u：GetProcAddress 拿真实运行时地址（不依赖 RVA 常量——v16t 用 RVA 0x3DE10
+    //   落点核验失败：运行时 0x1003DE10 = 08 8B 4D DC 89 48 ≠ 文件 64 A1… → MSystem .text 运行时被改）
+    pW = GetProcAddress(hMs, "?Write@CImage@@QAEXVCRct@@ABVCStr@@@Z");
+    if (!pW) { log_msg("[CJK] GetProcAddress(CImage::Write) 失败\n"); return 0; }
+    entry = (BYTE*)pW;
     memcpy(g_origDrawBody, entry, DRAWHDR_BYTES);
+    log_msg("[CJK] v16u CImage::Write: hMs=%08X pW=%08X bytes=%02X %02X %02X %02X %02X %02X\n",
+            (DWORD)hMs, (DWORD)pW,
+            g_origDrawBody[0], g_origDrawBody[1], g_origDrawBody[2],
+            g_origDrawBody[3], g_origDrawBody[4], g_origDrawBody[5]);
     for (i = 0; i < DRAWHDR_BYTES; i++)
         if (g_origDrawBody[i] != expect[i])
         {
-            log_msg("[CJK] CImage::Write 落点核验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+            log_msg("[CJK] CImage::Write 落点核验失败（运行时被改，不 hook）：%02X %02X %02X %02X %02X %02X\n",
                     g_origDrawBody[0], g_origDrawBody[1], g_origDrawBody[2],
                     g_origDrawBody[3], g_origDrawBody[4], g_origDrawBody[5]);
             return 0;
