@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v17c"
+#define CJK_VERSION "v17d"
 
 #include "pch.h"
 
@@ -1551,6 +1551,150 @@ static int install_setkey_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ★ v17d：hook CRegistry::GetValue(PBD)（MSystem RVA 0x607B0）——教程渲染【读 DYNAMIC 值】点！
+//   ?GetValue@CRegistry@@UBE?AVCStr@@PBD@Z：__thiscall，CStr 按值返回（hidden ret ptr）
+//   栈 [ret, ret_ptr, key]，this=ecx。函数头 51 8B 54 24 08（5 字节完整），尾 retn 8。
+//   eax = ret_ptr（CStr* = [vtable @0][data_ptr @4]）→ post 里改写/记录。
+//   ★ 为什么是它：教程渲染用运行时 §L 名（.xrg 的 "TUTORIAL_JUMP"）查 DYNAMIC stringtable →
+//     CRegistry::GetValue(PBD)（Dynamic 继承基类实现）→ 返回注册值 '键名'（半角 ASCII → @）。
+//     post 模式（v16r 教训：post 结尾 jmp 回原调用者）：key 含 TUTORIAL_ → data 改写
+//     （key_replace：'键名' → 中文）+ 日志 CJK_getval_log.txt。
+// ═══════════════════════════════════════════════════════════════════════
+#define MS_GETVAL_RVA 0x607B0u
+#define GETVAL_HDR_BYTES 5
+static BYTE  g_origGetValBody[GETVAL_HDR_BYTES];
+static void* g_getValTramp = NULL;
+static BOOL  g_hookedGetVal = FALSE;
+static DWORD g_getValOrigRet = 0;
+static DWORD g_getValKey = 0;          // hook_impl 保存的 key 参数（post 用）
+
+static void __cdecl cjk_getval_post_c(DWORD retPtr)
+{
+    static volatile LONG s_n = 0;
+    char sb[700], *p;
+    WORD* data;
+    const char* key;
+    LONG n;
+    int i, kl, isTut;
+    if (!retPtr || !g_getValKey) return;
+    __try
+    {
+        key = (const char*)g_getValKey;
+        kl = 0;
+        __try { while (key[kl] && kl < 48) kl++; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { kl = 0; }
+        // 只处理 TUTORIAL_ 前缀（教程键名；其他配置值原样放行）
+        isTut = (kl >= 9 && key[0] == 'T' && key[1] == 'U' && key[2] == 'T' &&
+                 key[3] == 'O' && key[4] == 'R' && key[5] == 'I' &&
+                 key[6] == 'A' && key[7] == 'L' && key[8] == '_');
+        if (!isTut) return;
+        data = *(WORD**)(retPtr + 4);
+        if (!data || data == (WORD*)-2) return;
+        // ★ 改写：'键名' → 中文（key_replace 只处理引号+ASCII 键名，等长/缩短替换，零越界）
+        key_replace(data + 1, 512);
+        // 日志（前 100 条）
+        n = InterlockedIncrement(&s_n);
+        if (n <= 100)
+        {
+            p = sb;
+            p += wsprintfA(p, "[GETVAL %ld] key=", n);
+            for (i = 0; i < kl; i++)
+                p += wsprintfA(p, "%c", (key[i] >= 0x20 && key[i] < 0x7F) ? key[i] : '.');
+            p += wsprintfA(p, " ret=%08X | ", retPtr);
+            for (i = 0; i < 20; i++)
+                p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+            p += wsprintfA(p, "\n");
+            {
+                HANDLE h = CreateFileA("CJK_getval_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                       NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (h != INVALID_HANDLE_VALUE)
+                {
+                    SetFilePointer(h, 0, NULL, FILE_END);
+                    DWORD wn; WriteFile(h, sb, (DWORD)(p - sb), &wn, NULL);
+                    CloseHandle(h);
+                }
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+// post：原函数 retn 8 后跳入。进入时 eax = ret_ptr（原函数 mov eax, esi）。
+// 栈：retn 8 已弹返回地址并清 ret_ptr+key → 栈顶 = 调用者栈 → jmp 回原调用者（v16r 教训）
+static void __declspec(naked) cjk_getval_post(void)
+{
+    __asm
+    {
+        pushad
+        mov  eax, [esp + 0x1C]           ; 原 eax = ret_ptr（CStr*）
+        push eax
+        call cjk_getval_post_c
+        add  esp, 4
+        popad
+        jmp  dword ptr [g_getValOrigRet] ; ★ v16r：不 ret，jmp 回保存的原调用者
+    }
+}
+static DWORD cjk_getval_post_addr = (DWORD)cjk_getval_post;
+
+// hook_impl：保存 orig ret + key（[ebp+0xC]）→ 改返回地址 → jmp trampoline（this 留 ecx）
+static void __declspec(naked) cjk_getval_hook_impl(void)
+{
+    __asm
+    {
+        ; 进入：栈 [ret, ret_ptr, key]，this = ecx（__thiscall！严禁碰 ecx）
+        push ebp
+        mov  ebp, esp
+        push eax
+        mov  eax, [ebp + 4]              ; 原返回地址
+        mov  g_getValOrigRet, eax        ; 保存 → post 里 jmp 回
+        mov  eax, [ebp + 0xC]            ; key（[ebp+8]=ret_ptr, [ebp+0xC]=key）
+        mov  g_getValKey, eax            ; 保存 → post 里检查 TUTORIAL_
+        mov  eax, cjk_getval_post_addr   ; post 地址
+        mov  [ebp + 4], eax              ; 替换 → 原函数 retn 8 后先到 post
+        pop  eax
+        pop  ebp
+        jmp  dword ptr [g_getValTramp]   ; 跳板：原 5 字节 + jmp 原函数+5（this 仍在 ecx）
+    }
+}
+
+static int install_getval_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMs;
+    int i;
+    static const BYTE expect[GETVAL_HDR_BYTES] = {0x51, 0x8B, 0x54, 0x24, 0x08};
+    if (g_hookedGetVal) return 1;
+    hMs = GetModuleHandleA("MSystem.dll");
+    if (!hMs) return 0;
+    entry = (BYTE*)hMs + MS_GETVAL_RVA;
+    memcpy(g_origGetValBody, entry, GETVAL_HDR_BYTES);
+    for (i = 0; i < GETVAL_HDR_BYTES; i++)
+        if (g_origGetValBody[i] != expect[i])
+        {
+            log_msg("[CJK] GetValue 落点核验失败：%02X %02X %02X %02X %02X，跳过\n",
+                    g_origGetValBody[0], g_origGetValBody[1], g_origGetValBody[2],
+                    g_origGetValBody[3], g_origGetValBody[4]);
+            return 0;
+        }
+    g_getValTramp = VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_getValTramp) return 0;
+    memcpy(g_getValTramp, g_origGetValBody, GETVAL_HDR_BYTES);
+    ((BYTE*)g_getValTramp)[GETVAL_HDR_BYTES] = 0xE9;
+    *(DWORD*)((BYTE*)g_getValTramp + GETVAL_HDR_BYTES + 1) =
+        ((DWORD)entry + GETVAL_HDR_BYTES) - ((DWORD)g_getValTramp + GETVAL_HDR_BYTES + 5);
+    if (!VirtualProtect(entry, GETVAL_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_getval_hook_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, GETVAL_HDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, GETVAL_HDR_BYTES);
+    g_hookedGetVal = TRUE;
+    log_msg("[CJK] v17d GetValue(PBD) 本体 hook：%08X -> %08X（教程读 DYNAMIC 值点，post 改写）\n",
+            (DWORD)entry, (DWORD)cjk_getval_hook_impl);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ★ v16t：hook CImage::Write（MSystem RVA 0x3DE10）——文本绘制的最终出口！
 //   __thiscall Write(CImage* this, CRct rect(16B), const CStr& text)
 //   text（CStr*）= [esp+0x14]（入口处）。函数头 = mov eax, fs:0（64 A1 00 00 00 00，6 字节）。
@@ -2508,10 +2652,12 @@ static BOOL install_hook(void)
             install_wide_body_hook();
             // ★ v16q：hook Localize_FindKeyValue 本体（教程 §L 键名查表点 → 键名汉字映射）
             install_findkey_hook();
-            // ★ v17b：hook CRegistry_Dynamic::SetThisKey(PBD,VCStr) 本体——EXE 教程键名注册点
-            //   （0x407553 等 7 处 call [eax+0x124] = vtable+292 = SetThisKey），前置只读记录注册值格式。
-            //   ⚠️ v16y/v16z 的 GetKeyName hook 已移除（v17a 实锤：MXR 内部数据，非键名源，只破坏不收益）
-            install_setkey_hook();
+            // ★ v17d：hook CRegistry::GetValue(PBD)（0x100607B0）——教程渲染【读 DYNAMIC 值】的最终点！
+            //   反汇编实证：EXE 7 个注册点（0x407553 等）vtable+0x124 = SetThisKey(this,key) 单参
+            //   （只进节点不设值，v17b 的 SetThisKey(PBD,VCStr) 是另一重载，EXE 没调——移除）；
+            //   教程渲染用运行时 §L 名（.xrg）查 DYNAMIC → GetValue(PBD) → 返回 '键名'。
+            //   post 模式：key 含 TUTORIAL_ → 返回值 data 改写（'键名' → 中文）+ 日志。
+            install_getval_hook();
             // ★ v16t：hook CImage::Write 本体（文本绘制出口，前置全角化 → 覆盖教程/字幕/UI）
             install_draw_hook();
 
