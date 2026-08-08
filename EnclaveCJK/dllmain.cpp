@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v17a"
+#define CJK_VERSION "v17b"
 
 #include "pch.h"
 
@@ -1409,6 +1409,129 @@ static int install_keyname_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ★ v17b：hook CRegistry_Dynamic::SetThisKey(PBD,VCStr)（MSystem RVA 0xA9670）
+//   —— EXE 教程键名注册点！0x407553 等 7 处 call [eax+0x124] = vtable+292 = 本函数
+//   （IDA 实证：vtable 0x1012E74C 第 73 槽 = 0x100A9670，0x124/4 = 73）。
+//   __thiscall SetThisKey(CRegistry_Dynamic* this, const char* key, CStr value)
+//   栈 [ret, key, value(8B)]。value = 注册值（如 'MOUSEBUTTON1' 带引号，写入 DYNAMIC stringtable）。
+//   前置只读：记录 key + value data 快照 → CJK_setkey_log.txt（一锤定音注册值格式）
+//   函数头 = 64 A1 00 00 00 00（mov eax, fs:0，6 字节完整指令）
+//   ⚠️ 前置模式（v16t 同款）：hook_impl 不碰返回地址、pushad/popad 保护寄存器、
+//      this 留在 ecx（popad 恢复）→ 零崩溃风险。
+// ═══════════════════════════════════════════════════════════════════════
+#define MS_SETKEY_RVA 0xA9670u
+#define SETKEY_HDR_BYTES 6
+static BYTE  g_origSetKeyBody[SETKEY_HDR_BYTES];
+static void* g_setKeyTramp = NULL;
+static BOOL  g_hookedSetKey = FALSE;
+
+// 前置只读记录：key + value CStr 数据快照
+static void __cdecl cjk_setkey_pre_c(DWORD valueLo, const char* key)
+{
+    static volatile LONG s_n = 0;
+    char sb[700], *p;
+    WORD* data;
+    LONG n;
+    int i;
+    if (!key) return;
+    __try
+    {
+        data = *(WORD**)(valueLo + 4);
+        if (!data || data == (WORD*)-2) return;
+        n = InterlockedIncrement(&s_n);
+        if (n <= 300)
+        {
+            p = sb;
+            p += wsprintfA(p, "[SETKEY %ld] key=", n);
+            {
+                const char* k = key;
+                int kl = 0;
+                __try { while (k[kl] && kl < 48) kl++; }
+                __except (EXCEPTION_EXECUTE_HANDLER) { kl = 0; }
+                for (i = 0; i < kl; i++)
+                    p += wsprintfA(p, "%c", (k[i] >= 0x20 && k[i] < 0x7F) ? k[i] : '.');
+            }
+            p += wsprintfA(p, " out=%08X | ", valueLo);
+            for (i = 0; i < 24; i++)
+                p += wsprintfA(p, "%04X ", (unsigned)data[i]);
+            p += wsprintfA(p, "\n");
+            {
+                HANDLE h = CreateFileA("CJK_setkey_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                       NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (h != INVALID_HANDLE_VALUE)
+                {
+                    SetFilePointer(h, 0, NULL, FILE_END);
+                    DWORD wn; WriteFile(h, sb, (DWORD)(p - sb), &wn, NULL);
+                    CloseHandle(h);
+                }
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+// 前置：取 key（[esp+0x28]）+ value.lo（[esp+0x2C]）→ pre_c → jmp trampoline（this 留在 ecx）
+static void __declspec(naked) cjk_setkey_hook_impl(void)
+{
+    __asm
+    {
+        ; 进入：栈 [ret, key, value.lo, value.hi]，this = ecx（__thiscall！）
+        push ebp
+        mov  ebp, esp
+        pushad
+        ; push ebp(4) + pushad(32) = 36 = 0x24
+        ; [esp+0x24] = ret, [esp+0x28] = key, [esp+0x2C] = value.lo
+        mov  eax, [esp + 0x28]           ; key
+        mov  ecx, [esp + 0x2C]           ; value.lo（CStr 结构起始）
+        push ecx
+        push eax
+        call cjk_setkey_pre_c
+        add  esp, 8
+        popad
+        pop  ebp
+        jmp  dword ptr [g_setKeyTramp]   ; 执行原函数（popad 已恢复 ecx = this）
+    }
+}
+
+static int install_setkey_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMs;
+    int i;
+    static const BYTE expect[SETKEY_HDR_BYTES] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00};
+    if (g_hookedSetKey) return 1;
+    hMs = GetModuleHandleA("MSystem.dll");
+    if (!hMs) return 0;
+    entry = (BYTE*)hMs + MS_SETKEY_RVA;
+    memcpy(g_origSetKeyBody, entry, SETKEY_HDR_BYTES);
+    for (i = 0; i < SETKEY_HDR_BYTES; i++)
+        if (g_origSetKeyBody[i] != expect[i])
+        {
+            log_msg("[CJK] SetThisKey 落点核验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+                    g_origSetKeyBody[0], g_origSetKeyBody[1], g_origSetKeyBody[2],
+                    g_origSetKeyBody[3], g_origSetKeyBody[4], g_origSetKeyBody[5]);
+            return 0;
+        }
+    g_setKeyTramp = VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_setKeyTramp) return 0;
+    memcpy(g_setKeyTramp, g_origSetKeyBody, SETKEY_HDR_BYTES);
+    ((BYTE*)g_setKeyTramp)[SETKEY_HDR_BYTES] = 0xE9;
+    *(DWORD*)((BYTE*)g_setKeyTramp + SETKEY_HDR_BYTES + 1) =
+        ((DWORD)entry + SETKEY_HDR_BYTES) - ((DWORD)g_setKeyTramp + SETKEY_HDR_BYTES + 5);
+    if (!VirtualProtect(entry, SETKEY_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_setkey_hook_impl - ((DWORD)entry + 5);
+    entry[5] = 0x90;
+    VirtualProtect(entry, SETKEY_HDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, SETKEY_HDR_BYTES);
+    g_hookedSetKey = TRUE;
+    log_msg("[CJK] v17b SetThisKey 本体 hook：%08X -> %08X（EXE 教程键名注册点，前置只读）\n",
+            (DWORD)entry, (DWORD)cjk_setkey_hook_impl);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ★ v16t：hook CImage::Write（MSystem RVA 0x3DE10）——文本绘制的最终出口！
 //   __thiscall Write(CImage* this, CRct rect(16B), const CStr& text)
 //   text（CStr*）= [esp+0x14]（入口处）。函数头 = mov eax, fs:0（64 A1 00 00 00 00，6 字节）。
@@ -2366,8 +2489,10 @@ static BOOL install_hook(void)
             install_wide_body_hook();
             // ★ v16q：hook Localize_FindKeyValue 本体（教程 §L 键名查表点 → 键名汉字映射）
             install_findkey_hook();
-            // ★ v16y：hook CKeyContainer::GetKeyName（MCCdyn）——教程键名显示名源头
-            install_keyname_hook();
+            // ★ v17b：hook CRegistry_Dynamic::SetThisKey(PBD,VCStr) 本体——EXE 教程键名注册点
+            //   （0x407553 等 7 处 call [eax+0x124] = vtable+292 = SetThisKey），前置只读记录注册值格式。
+            //   ⚠️ v16y/v16z 的 GetKeyName hook 已移除（v17a 实锤：MXR 内部数据，非键名源，只破坏不收益）
+            install_setkey_hook();
             // ★ v16t：hook CImage::Write 本体（文本绘制出口，前置全角化 → 覆盖教程/字幕/UI）
             install_draw_hook();
 
