@@ -1,0 +1,230 @@
+## I:\SteamLibrary\steamapps\common\Enclave\MSystem.dll  imgbase=10000000  RVA 10A6A0-10A900
+========================================================================================
+10A6A0  6a ff                    push    -1                                
+10A6A2  68 da 80 11 10           push    0x101180da                        
+10A6A7  64 a1 00 00 00 00        mov     eax, dword ptr fs:[0]             
+10A6AD  50                       push    eax                               
+10A6AE  64 89 25 00 00 00 00     mov     dword ptr fs:[0], esp             
+10A6B5  51                       push    ecx                               
+10A6B6  56                       push    esi                               
+10A6B7  c7 44 24 04 00 00 00 00  mov     dword ptr [esp + 4], 0            
+10A6BF  e8 36 2b f0 ff           call    0xd1fa                            
+10A6C4  8b 10                    mov     edx, dword ptr [eax]              
+10A6C6  68 ac fd 26 10           push    0x1026fdac                           ; A"REGISTRY"
+10A6CB  8d 4c 24 08              lea     ecx, [esp + 8]                    
+10A6CF  51                       push    ecx                               
+10A6D0  8b c8                    mov     ecx, eax                          
+10A6D2  ff 52 20                 call    dword ptr [edx + 0x20]            
+10A6D5  8b 54 24 04              mov     edx, dword ptr [esp + 4]          
+10A6D9  6a 00                    push    0                                 
+10A6DB  68 18 64 17 10           push    0x10176418                        
+10A6E0  68 40 5a 17 10           push    0x10175a40                        
+10A6E5  6a 00                    push    0                                 
+10A6E7  52                       push    edx                               
+10A6E8  c7 44 24 24 00 00 00 00  mov     dword ptr [esp + 0x24], 0         
+10A6F0  e8 86 e6 fd ff           call    0xe8d7b                           
+10A6F5  8b 4c 24 18              mov     ecx, dword ptr [esp + 0x18]       
+10A6F9  83 c4 14                 add     esp, 0x14                         
+10A6FC  85 c9                    test    ecx, ecx                          
+10A6FE  8b f0                    mov     esi, eax                          
+10A700  c7 44 24 10 ff ff ff ff  mov     dword ptr [esp + 0x10], 0xffffffff
+10A708  74 1a                    je      0x10a724                          
+10A70A  e8 71 9a ef ff           call    0x4180                            
+10A70F  85 c0                    test    eax, eax                          
+10A711  75 11                    jne     0x10a724                          
+10A713  8b 4c 24 04              mov     ecx, dword ptr [esp + 4]          
+10A717  8b 01                    mov     eax, dword ptr [ecx]              
+10A719  ff 50 14                 call    dword ptr [eax + 0x14]            
+10A71C  c7 44 24 04 00 00 00 00  mov     dword ptr [esp + 4], 0            
+10A724  85 f6                    test    esi, esi                          
+10A726  75 24                    jne     0x10a74c                          
+10A728  8b 4c 24 1c              mov     ecx, dword ptr [esp + 0x1c]       
+10A72C  8b 74 24 18              mov     esi, dword ptr [esp + 0x18]       
+10A730  51                       push    ecx                               
+10A731  56                       push    esi                               
+10A732  e8 d3 ee ef ff           call    0x960a                            
+10A737  83 c4 08                 add     esp, 8                            
+10A73A  8b c6                    mov     eax, esi                          
+10A73C  5e                       pop     esi                               
+10A73D  8b 4c 24 04              mov     ecx, dword ptr [esp + 4]          
+10A741  64 89 0d 00 00 00 00     mov     dword ptr fs:[0], ecx             
+10A748  83 c4 10                 add     esp, 0x10                         
+10A74B  c3                       ret                                       
+10A74C  8b 16                    mov     edx, dword ptr [esi]              
+10A74E  68 b8 fd 26 10           push    0x1026fdb8                           ; A"STRINGTABLES"
+10A753  8b ce                    mov     ecx, esi                          
+10A755  ff 92 90 00 00 00        call    dword ptr [edx + 0x90]            
+10A75B  8b f0                    mov     esi, eax                          
+10A75D  85 f6                    test    esi, esi                          
+10A75F  75 24                    jne     0x10a785                          
+10A761  8b 44 24 1c              mov     eax, dword ptr [esp + 0x1c]       
+10A765  8b 74 24 18              mov     esi, dword ptr [esp + 0x18]       
+10A769  50                       push    eax                               
+10A76A  56                       push    esi                               
+10A76B  e8 9a ee ef ff           call    0x960a                            
+10A770  83 c4 08                 add     esp, 8                            
+10A773  8b c6                    mov     eax, esi                          
+10A775  5e                       pop     esi                               
+10A776  8b 4c 24 04              mov     ecx, dword ptr [esp + 4]          
+10A77A  64 89 0d 00 00 00 00     mov     dword ptr fs:[0], ecx             
+10A781  83 c4 10                 add     esp, 0x10                         
+10A784  c3                       ret                                       
+10A785  8b 16                    mov     edx, dword ptr [esi]              
+10A787  53                       push    ebx                               
+10A788  57                       push    edi                               
+10A789  8b ce                    mov     ecx, esi                          
+10A78B  ff 52 38                 call    dword ptr [edx + 0x38]            
+10A78E  8b 5c 24 24              mov     ebx, dword ptr [esp + 0x24]       
+10A792  8b f8                    mov     edi, eax                          
+10A794  4f                       dec     edi                               
+10A795  78 1a                    js      0x10a7b1                          
+10A797  8b 06                    mov     eax, dword ptr [esi]              
+10A799  57                       push    edi                               
+10A79A  8b ce                    mov     ecx, esi                          
+10A79C  ff 50 44                 call    dword ptr [eax + 0x44]            
+10A79F  8b 10                    mov     edx, dword ptr [eax]              
+10A7A1  53                       push    ebx                               
+10A7A2  8b c8                    mov     ecx, eax                          
+10A7A4  ff 92 90 00 00 00        call    dword ptr [edx + 0x90]            
+10A7AA  85 c0                    test    eax, eax                          
+10A7AC  75 25                    jne     0x10a7d3                          
+10A7AE  4f                       dec     edi                               
+10A7AF  79 e6                    jns     0x10a797                          
+10A7B1  8b 74 24 20              mov     esi, dword ptr [esp + 0x20]       
+10A7B5  53                       push    ebx                               
+10A7B6  56                       push    esi                               
+10A7B7  e8 4e ee ef ff           call    0x960a                            
+10A7BC  83 c4 08                 add     esp, 8                            
+10A7BF  5f                       pop     edi                               
+10A7C0  5b                       pop     ebx                               
+10A7C1  8b c6                    mov     eax, esi                          
+10A7C3  5e                       pop     esi                               
+10A7C4  8b 4c 24 04              mov     ecx, dword ptr [esp + 4]          
+10A7C8  64 89 0d 00 00 00 00     mov     dword ptr fs:[0], ecx             
+10A7CF  83 c4 10                 add     esp, 0x10                         
+10A7D2  c3                       ret                                       
+10A7D3  8b 74 24 20              mov     esi, dword ptr [esp + 0x20]       
+10A7D7  8b 10                    mov     edx, dword ptr [eax]              
+10A7D9  56                       push    esi                               
+10A7DA  8b c8                    mov     ecx, eax                          
+10A7DC  e9 1f 98 1d 00           jmp     0x2e4000                          
+10A7E1  90                       nop                                       
+10A7E2  8b 4c 24 10              mov     ecx, dword ptr [esp + 0x10]       
+10A7E6  5f                       pop     edi                               
+10A7E7  5b                       pop     ebx                               
+10A7E8  8b c6                    mov     eax, esi                          
+10A7EA  5e                       pop     esi                               
+10A7EB  64 89 0d 00 00 00 00     mov     dword ptr fs:[0], ecx             
+10A7F2  83 c4 10                 add     esp, 0x10                         
+10A7F5  c3                       ret                                       
+10A7F6  90                       nop                                       
+10A7F7  90                       nop                                       
+10A7F8  90                       nop                                       
+10A7F9  90                       nop                                       
+10A7FA  90                       nop                                       
+10A7FB  90                       nop                                       
+10A7FC  90                       nop                                       
+10A7FD  90                       nop                                       
+10A7FE  90                       nop                                       
+10A7FF  90                       nop                                       
+10A800  6a ff                    push    -1                                
+10A802  68 ec 80 11 10           push    0x101180ec                        
+10A807  64 a1 00 00 00 00        mov     eax, dword ptr fs:[0]             
+10A80D  50                       push    eax                               
+10A80E  64 89 25 00 00 00 00     mov     dword ptr fs:[0], esp             
+10A815  51                       push    ecx                               
+10A816  56                       push    esi                               
+10A817  57                       push    edi                               
+10A818  e8 dd 29 f0 ff           call    0xd1fa                            
+10A81D  8b 10                    mov     edx, dword ptr [eax]              
+10A81F  68 c8 fd 26 10           push    0x1026fdc8                           ; A"REGISTRY"
+10A824  8d 4c 24 0c              lea     ecx, [esp + 0xc]                  
+10A828  51                       push    ecx                               
+10A829  8b c8                    mov     ecx, eax                          
+10A82B  ff 52 20                 call    dword ptr [edx + 0x20]            
+10A82E  8b 54 24 08              mov     edx, dword ptr [esp + 8]          
+10A832  33 ff                    xor     edi, edi                          
+10A834  57                       push    edi                               
+10A835  68 18 64 17 10           push    0x10176418                        
+10A83A  68 40 5a 17 10           push    0x10175a40                        
+10A83F  57                       push    edi                               
+10A840  52                       push    edx                               
+10A841  89 7c 24 28              mov     dword ptr [esp + 0x28], edi       
+10A845  e8 31 e5 fd ff           call    0xe8d7b                           
+10A84A  8b 4c 24 1c              mov     ecx, dword ptr [esp + 0x1c]       
+10A84E  83 c4 14                 add     esp, 0x14                         
+10A851  3b cf                    cmp     ecx, edi                          
+10A853  8b f0                    mov     esi, eax                          
+10A855  c7 44 24 14 ff ff ff ff  mov     dword ptr [esp + 0x14], 0xffffffff
+10A85D  74 16                    je      0x10a875                          
+10A85F  e8 1c 99 ef ff           call    0x4180                            
+10A864  85 c0                    test    eax, eax                          
+10A866  75 0d                    jne     0x10a875                          
+10A868  8b 4c 24 08              mov     ecx, dword ptr [esp + 8]          
+10A86C  8b 01                    mov     eax, dword ptr [ecx]              
+10A86E  ff 50 14                 call    dword ptr [eax + 0x14]            
+10A871  89 7c 24 08              mov     dword ptr [esp + 8], edi          
+10A875  3b f7                    cmp     esi, edi                          
+10A877  74 15                    je      0x10a88e                          
+10A879  8b 16                    mov     edx, dword ptr [esi]              
+10A87B  68 d4 fd 26 10           push    0x1026fdd4                           ; A"STRINGTABLES"
+10A880  8b ce                    mov     ecx, esi                          
+10A882  ff 92 90 00 00 00        call    dword ptr [edx + 0x90]            
+10A888  8b f0                    mov     esi, eax                          
+10A88A  3b f7                    cmp     esi, edi                          
+10A88C  75 13                    jne     0x10a8a1                          
+10A88E  5f                       pop     edi                               
+10A88F  32 c0                    xor     al, al                            
+10A891  5e                       pop     esi                               
+10A892  8b 4c 24 04              mov     ecx, dword ptr [esp + 4]          
+10A896  64 89 0d 00 00 00 00     mov     dword ptr fs:[0], ecx             
+10A89D  83 c4 10                 add     esp, 0x10                         
+10A8A0  c3                       ret                                       
+10A8A1  8b 06                    mov     eax, dword ptr [esi]              
+10A8A3  53                       push    ebx                               
+10A8A4  8b ce                    mov     ecx, esi                          
+10A8A6  ff 50 38                 call    dword ptr [eax + 0x38]            
+10A8A9  8b f8                    mov     edi, eax                          
+10A8AB  4f                       dec     edi                               
+10A8AC  78 1e                    js      0x10a8cc                          
+10A8AE  8b 5c 24 20              mov     ebx, dword ptr [esp + 0x20]       
+10A8B2  8b 16                    mov     edx, dword ptr [esi]              
+10A8B4  57                       push    edi                               
+10A8B5  8b ce                    mov     ecx, esi                          
+10A8B7  ff 52 44                 call    dword ptr [edx + 0x44]            
+10A8BA  8b 10                    mov     edx, dword ptr [eax]              
+10A8BC  53                       push    ebx                               
+10A8BD  8b c8                    mov     ecx, eax                          
+10A8BF  ff 92 90 00 00 00        call    dword ptr [edx + 0x90]            
+10A8C5  85 c0                    test    eax, eax                          
+10A8C7  75 17                    jne     0x10a8e0                          
+10A8C9  4f                       dec     edi                               
+10A8CA  79 e6                    jns     0x10a8b2                          
+10A8CC  5b                       pop     ebx                               
+10A8CD  5f                       pop     edi                               
+10A8CE  32 c0                    xor     al, al                            
+10A8D0  5e                       pop     esi                               
+10A8D1  8b 4c 24 04              mov     ecx, dword ptr [esp + 4]          
+10A8D5  64 89 0d 00 00 00 00     mov     dword ptr fs:[0], ecx             
+10A8DC  83 c4 10                 add     esp, 0x10                         
+10A8DF  c3                       ret                                       
+10A8E0  8b 4c 24 10              mov     ecx, dword ptr [esp + 0x10]       
+10A8E4  5b                       pop     ebx                               
+10A8E5  5f                       pop     edi                               
+10A8E6  b0 01                    mov     al, 1                             
+10A8E8  5e                       pop     esi                               
+10A8E9  64 89 0d 00 00 00 00     mov     dword ptr fs:[0], ecx             
+10A8F0  83 c4 10                 add     esp, 0x10                         
+10A8F3  c3                       ret                                       
+10A8F4  90                       nop                                       
+10A8F5  90                       nop                                       
+10A8F6  90                       nop                                       
+10A8F7  90                       nop                                       
+10A8F8  90                       nop                                       
+10A8F9  90                       nop                                       
+10A8FA  90                       nop                                       
+10A8FB  90                       nop                                       
+10A8FC  90                       nop                                       
+10A8FD  90                       nop                                       
+10A8FE  90                       nop                                       
+10A8FF  90                       nop                                       

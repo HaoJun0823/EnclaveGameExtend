@@ -1,0 +1,39 @@
+
+############################################################################################
+## I:\SteamLibrary\steamapps\common\Enclave\Enclave.exe   imgbase=00400000
+############################################################################################
+  [NARROW] .text RVA=027606  cmp bl, 0A7h               | ctx 90 90 53 8a 1c 11 33 c0 80 fb a7 5b 75 31 0f be 4c 11 01 83 c1 bf
+  [WIDE? ] .text RVA=027692  cmp word [reg+reg*n], ?    | ctx 90 90 90 90 90 90 33 c0 66 81 3c 51 a7 00 75 31 0f be 4c 51 02 83
+
+############################################################################################
+## I:\SteamLibrary\steamapps\common\Enclave\Sbz1\GameWorld.dll   imgbase=10000000
+############################################################################################
+  [NARROW] .text RVA=11AB4C  cmp al, 0A7h               | ctx c3 d9 2c 24 5a c3 dd 05 3c a7 14 10 d9 c9 d9 fd dd d9 d9 c0 d9 e1
+  [NARROW] .text RVA=007EC6  cmp bl, 0A7h               | ctx 90 90 53 8a 1c 11 33 c0 80 fb a7 5b 75 31 0f be 4c 11 01 83 c1 bf
+  [NARROW] .text RVA=008BE6  cmp bl, 0A7h               | ctx 90 90 53 8a 1c 11 33 c0 80 fb a7 5b 75 31 0f be 4c 11 01 83 c1 bf
+  [NARROW] .text RVA=08DD8B  cmp byte [eax], 0A7h       | ctx 41 08 83 c1 08 ff 50 28 80 38 a7 75 7f 8b 4c 24 14 8b 51 08 83 c1
+  [WIDE? ] .text RVA=008C72  cmp word [reg+reg*n], ?    | ctx 90 90 90 90 90 90 33 c0 66 81 3c 51 a7 00 75 31 0f be 4c 51 02 83
+  [NARROW] .text RVA=04CB37  mov al, 0A7h               | ctx 00 00 01 ff 52 18 50 68 b0 a7 17 10 56 8d 4c 24 1c e8 35 72 0a 00
+  [NARROW] .text RVA=12CDB6  mov al, 0A7h               | ctx ff 8b 8d b0 fe ff ff e9 b0 a7 fc ff 8b 8d a4 fe ff ff e9 8b 82 f1
+  [?     ] .text RVA=0BEF1C  push 0A7h                  | ctx 30 68 a8 de 18 10 50 e8 6a a7 03 00 83 c4 08 8d 8c 24 00 02 00 00
+
+############################################################################################
+## I:\SteamLibrary\steamapps\common\Enclave\MSystem.dll   imgbase=10000000
+############################################################################################
+  [NARROW] .text RVA=01E0EE  cmp al, 0A7h               | ctx 8d 7e fc 50 6a 24 56 e8 3c a7 0c 00 f6 c3 01 74 2e a1 f8 fe 26 10
+  [NARROW] .text RVA=10AC18  cmp al, 0A7h               | ctx 84 c0 0f 84 90 00 00 00 3c a7 75 4a 80 7e 01 70 75 44 8a 46 02 3c
+  [WIDE  ] .text RVA=10AB65  cmp ax, 0A7h               | ctx 85 c0 0f 84 43 01 00 00 66 3d a7 00 75 54 66 83 7e 02 70 75 4d 66
+  [WIDE  ] .text RVA=10A931  cmp cx, 0A7h               | ctx 08 66 85 c9 56 57 74 19 66 81 f9 a7 00 74 12 66 83 f9 20 74 0c 66
+  [WIDE  ] .text RVA=10AA7C  cmp cx, 0A7h               | ctx 8d 70 02 00 00 66 8b 08 66 81 f9 a7 00 0f 85 4e 02 00 00 66 8b 50
+  [WIDE  ] .text RVA=10A56A  cmp word [eax], 0A7h       | ctx 8b 74 24 0c 8b 06 33 db 66 81 38 a7 00 75 63 55 8b 6c 24 14 57 8b
+  [WIDE  ] .text RVA=10A5CB  cmp word [eax], 0A7h       | ctx 03 c2 43 83 c7 04 89 06 66 81 38 a7 00 74 ae 5f 5d 5e 8b c3 5b c3
+  [?     ] .text RVA=040A72  push 0A7h                  | ctx 14 50 51 8b d6 8b cf e8 6a a7 ff ff 8b 8c 24 24 1e 00 00 64 89 0d
+
+############################################################################################
+## I:\SteamLibrary\steamapps\common\Enclave\Sbz1\GameClasses.dll   imgbase=10000000
+############################################################################################
+  [NARROW] .text RVA=1550A0  cmp al, 0A7h               | ctx 00 51 8b cb d9 1c 24 e8 3c a7 fe ff 8b 44 24 14 d9 44 24 18 56 dd
+  [NARROW] .text RVA=062701  mov al, 0A7h               | ctx 90 90 90 90 90 90 90 b8 b0 a7 21 10 c3 90 90 90 90 90 90 90 90 90
+  [NARROW] .text RVA=062AF1  mov al, 0A7h               | ctx 90 90 90 90 90 90 90 b8 b0 a7 21 10 c3 90 90 90 90 90 90 90 90 90
+  [NARROW] .text RVA=1A062A  mov al, 0A7h               | ctx 00 00 68 14 2e 1e 10 b9 b0 a7 21 10 e8 4d 20 e6 ff c7 05 d0 a7 21
+  [NARROW] .text RVA=1A06E1  mov al, 0A7h               | ctx 90 90 90 90 90 90 90 68 b0 a7 21 10 b9 10 a8 21 10 e8 bb 92 e6 ff

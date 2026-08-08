@@ -1,0 +1,104 @@
+## I:\SteamLibrary\steamapps\common\Enclave\MSystem.dll  imgbase=10000000  RVA 10A900-10AA20
+========================================================================================
+10A900  64 a1 00 00 00 00        mov     eax, dword ptr fs:[0]             
+10A906  6a ff                    push    -1                                
+10A908  68 0c 81 11 10           push    0x1011810c                        
+10A90D  50                       push    eax                               
+10A90E  64 89 25 00 00 00 00     mov     dword ptr fs:[0], esp             
+10A915  81 ec 14 01 00 00        sub     esp, 0x114                        
+10A91B  53                       push    ebx                               
+10A91C  8b 9c 24 28 01 00 00     mov     ebx, dword ptr [esp + 0x128]      
+10A923  8b 13                    mov     edx, dword ptr [ebx]              
+10A925  8b c2                    mov     eax, edx                          
+10A927  66 8b 08                 mov     cx, word ptr [eax]                
+10A92A  66 85 c9                 test    cx, cx                            
+10A92D  56                       push    esi                               
+10A92E  57                       push    edi                               
+10A92F  74 19                    je      0x10a94a                          
+10A931  66 81 f9 a7 00           cmp     cx, 0xa7                          
+10A936  74 12                    je      0x10a94a                          
+10A938  66 83 f9 20              cmp     cx, 0x20                          
+10A93C  74 0c                    je      0x10a94a                          
+10A93E  66 8b 48 02              mov     cx, word ptr [eax + 2]            
+10A942  83 c0 02                 add     eax, 2                            
+10A945  66 85 c9                 test    cx, cx                            
+10A948  75 e7                    jne     0x10a931                          
+10A94A  8b b4 24 34 01 00 00     mov     esi, dword ptr [esp + 0x134]      
+10A951  2b c2                    sub     eax, edx                          
+10A953  d1 f8                    sar     eax, 1                            
+10A955  8b f8                    mov     edi, eax                          
+10A957  8b 06                    mov     eax, dword ptr [esi]              
+10A959  8b ce                    mov     ecx, esi                          
+10A95B  ff 50 78                 call    dword ptr [eax + 0x78]            
+10A95E  3b f8                    cmp     edi, eax                          
+10A960  8b 0b                    mov     ecx, dword ptr [ebx]              
+10A962  7c 6e                    jl      0x10a9d2                          
+10A964  51                       push    ecx                               
+10A965  8d 54 24 1c              lea     edx, [esp + 0x1c]                 
+10A969  68 08 fd 26 10           push    0x1026fd08                           ; W"Too long localization ke"
+10A96E  52                       push    edx                               
+10A96F  e8 46 ed ef ff           call    0x96ba                            
+10A974  83 c4 0c                 add     esp, 0xc                          
+10A977  8b f0                    mov     esi, eax                          
+10A979  68 58 fd 26 10           push    0x1026fd58                           ; A"S:\Source\Enclave\Port_PC\SHARED\MOS\MSYSTEM\Mis"
+10A97E  ba 20 00 00 00           mov     edx, 0x20                         
+10A983  8d 4c 24 24              lea     ecx, [esp + 0x24]                 
+10A987  c7 84 24 2c 01 00 00 00 00 00 00 mov     dword ptr [esp + 0x12c], 0        
+10A992  e8 43 e6 ef ff           call    0x8fda                            
+10A997  8b f8                    mov     edi, eax                          
+10A999  8b 06                    mov     eax, dword ptr [esi]              
+10A99B  6a 00                    push    0                                 
+10A99D  8b ce                    mov     ecx, esi                          
+10A99F  c6 84 24 2c 01 00 00 01  mov     byte ptr [esp + 0x12c], 1         
+10A9A7  ff 50 18                 call    dword ptr [eax + 0x18]            
+10A9AA  8b 17                    mov     edx, dword ptr [edi]              
+10A9AC  50                       push    eax                               
+10A9AD  8b cf                    mov     ecx, edi                          
+10A9AF  ff 52 18                 call    dword ptr [edx + 0x18]            
+10A9B2  50                       push    eax                               
+10A9B3  68 9c fd 26 10           push    0x1026fd9c                           ; A"Localize_GetKey"
+10A9B8  6a 00                    push    0                                 
+10A9BA  8d 4c 24 20              lea     ecx, [esp + 0x20]                 
+10A9BE  e8 67 fe ef ff           call    0xa82a                            
+10A9C3  68 4c 79 14 10           push    0x1014794c                        
+10A9C8  8d 44 24 10              lea     eax, [esp + 0x10]                 
+10A9CC  50                       push    eax                               
+10A9CD  e8 18 dd fd ff           call    0xe86ea                           
+10A9D2  8b 16                    mov     edx, dword ptr [esi]              
+10A9D4  57                       push    edi                               
+10A9D5  6a 01                    push    1                                 
+10A9D7  51                       push    ecx                               
+10A9D8  8b ce                    mov     ecx, esi                          
+10A9DA  ff 52 24                 call    dword ptr [edx + 0x24]            
+10A9DD  33 d2                    xor     edx, edx                          
+10A9DF  8b c8                    mov     ecx, eax                          
+10A9E1  e8 04 9b ef ff           call    0x44ea                            
+10A9E6  8b 06                    mov     eax, dword ptr [esi]              
+10A9E8  8b ce                    mov     ecx, esi                          
+10A9EA  ff 50 24                 call    dword ptr [eax + 0x24]            
+10A9ED  c6 04 38 00              mov     byte ptr [eax + edi], 0           
+10A9F1  8b 03                    mov     eax, dword ptr [ebx]              
+10A9F3  8d 0c 3f                 lea     ecx, [edi + edi]                  
+10A9F6  5f                       pop     edi                               
+10A9F7  03 c1                    add     eax, ecx                          
+10A9F9  8b 8c 24 1c 01 00 00     mov     ecx, dword ptr [esp + 0x11c]      
+10AA00  89 03                    mov     dword ptr [ebx], eax              
+10AA02  5e                       pop     esi                               
+10AA03  5b                       pop     ebx                               
+10AA04  64 89 0d 00 00 00 00     mov     dword ptr fs:[0], ecx             
+10AA0B  81 c4 20 01 00 00        add     esp, 0x120                        
+10AA11  c3                       ret                                       
+10AA12  90                       nop                                       
+10AA13  90                       nop                                       
+10AA14  90                       nop                                       
+10AA15  90                       nop                                       
+10AA16  90                       nop                                       
+10AA17  90                       nop                                       
+10AA18  90                       nop                                       
+10AA19  90                       nop                                       
+10AA1A  90                       nop                                       
+10AA1B  90                       nop                                       
+10AA1C  90                       nop                                       
+10AA1D  90                       nop                                       
+10AA1E  90                       nop                                       
+10AA1F  90                       nop                                       

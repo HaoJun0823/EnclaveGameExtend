@@ -1,0 +1,30 @@
+############################################################################################
+## GameWorld.dll  imgbase=10000000
+############################################################################################
+
+-- Localize_FindKeyValue                      IAT=13E4F4  hits=1
+     jmp  @ RVA 100636
+
+-- Localize_Str(CStr)->CStr                   IAT=13E51C  hits=1
+     jmp  @ RVA 1005FA
+
+-- Localize_Str(WIDE src, wide* dst, int)     IAT=13E530  hits=1
+     jmp  @ RVA 1005DC
+
+-- Localize_Str(NARROW src, wide* dst, int)   IAT=13E534  hits=1
+     jmp  @ RVA 1005D6
+
+-- Localize_Str(CStr src, wide* dst, int)     IAT=13E540  hits=1
+     jmp  @ RVA 1005C4
+############################################################################################
+## Enclave.exe  imgbase=00400000
+############################################################################################
+
+-- Localize_Str(CStr src, wide* dst, int)     IAT=07744C  hits=1
+     jmp  @ RVA 0495AE
+
+-- Localize_Str(NARROW src, wide* dst, int)   IAT=077458  hits=1
+     jmp  @ RVA 0495C0
+
+-- Localize_Str(WIDE src, wide* dst, int)     IAT=07745C  hits=1
+     jmp  @ RVA 0495C6

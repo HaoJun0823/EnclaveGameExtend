@@ -1,0 +1,57 @@
+== MSystem.dll exports: 1931 ==
+  ** RVA 10A6A0 = Localize_Lookup    EXPORTED as Localize_FindKeyValue
+  ** RVA 10A900 = Localize_GetKey    EXPORTED as Localize_GetKey
+  ** RVA 10A560 = ParamCollect       EXPORTED as Localize_GetParams
+  ** RVA 10AA20 = MacroExpand(?)     EXPORTED as Localize_SubstituteKeys
+-- exports in 0x10A000..0x10B200: 12
+   10A560  Localize_GetParams
+   10A5E0  ?Localize_HasKey@@YA_NPBD@Z
+   10A600  ?Localize_HasKey@@YA_NPBG@Z
+   10A620  ?Localize_HasKey@@YA_NVCStr@@@Z
+   10A6A0  Localize_FindKeyValue
+   10A900  Localize_GetKey
+   10AA20  Localize_SubstituteKeys
+   10AD10  ?Localize_Str@@YAXPBGPAGH@Z
+   10ADB0  ?Localize_Str@@YAXPBDPAGH@Z
+   10AE20  ?Localize_Str@@YAXVCStr@@PAGH@Z
+   10AEB0  ?Localize_Str@@YA?AVCStr@@V1@@Z
+   10B120  MCreateCDAudio
+
+== GameWorld imports from MSystem: 102 ==
+   IAT=13E45C  ?GetFlagsString@CTC_TextureProperties@@QAE?AVCStr@@XZ
+   IAT=13E4D4  ??2CTextureContainer_VirtualXTC2@@SIPAXI@Z
+   IAT=13E4D8  ??0CTextureContainer_VirtualXTC2@@QAE@XZ
+   IAT=13E4DC  ??3CTextureContainer_VirtualXTC2@@SIXPAX@Z
+   IAT=13E4F4  Localize_FindKeyValue
+   IAT=13E51C  ?Localize_Str@@YA?AVCStr@@V1@@Z
+   IAT=13E530  ?Localize_Str@@YAXPBGPAGH@Z
+   IAT=13E534  ?Localize_Str@@YAXPBDPAGH@Z
+   IAT=13E540  ?Localize_Str@@YAXVCStr@@PAGH@Z
+   IAT=13E56C  ??2CTextureContainer_Plain@@SIPAXI@Z
+   IAT=13E570  ??0CTextureContainer_Plain@@QAE@XZ
+   IAT=13E57C  ??3CTextureContainer_Plain@@SIXPAX@Z
+   IAT=13E5A0  ??2CTextureContainer_VirtualXTC@@SIPAXI@Z
+   IAT=13E5A4  ??0CTextureContainer_VirtualXTC@@QAE@XZ
+   IAT=13E5AC  ??3CTextureContainer_VirtualXTC@@SIXPAX@Z
+
+== GameClasses imports from MSystem: 29 ==
+   IAT=1A72E4  ?Localize_Str@@YAXPBDPAGH@Z
+
+== Enclave.exe imports from MSystem: 183 ==
+   IAT=0773C0  ?Texture_GetPicmipFromGroup@CRC_Core@@UAEHH@Z
+   IAT=0773C4  ?Texture_GetMem@CRC_Core@@UAEHH@Z
+   IAT=0773C8  ?Texture_Copy@CRC_Core@@UAEXHHVCRct@@VCPnt@@@Z
+   IAT=0773CC  ?Texture_Precache@CRC_Core@@UAEXH@Z
+   IAT=0773D0  ?Texture_GetTCIDInfo@CRC_Core@@UAEPAVCRC_TCIDInfo@@XZ
+   IAT=0773D4  ?Texture_GetTC@CRC_Core@@UAEPAVCTextureContext@@XZ
+   IAT=07740C  ??3CTextureContainer_VirtualXTC@@SIXPAX@Z
+   IAT=077410  ??0CTextureContainer_VirtualXTC@@QAE@XZ
+   IAT=077414  ??2CTextureContainer_VirtualXTC@@SIPAXI@Z
+   IAT=077418  ??3CTextureContainer_Plain@@SIXPAX@Z
+   IAT=077424  ??0CTextureContainer_Plain@@QAE@XZ
+   IAT=077428  ??2CTextureContainer_Plain@@SIPAXI@Z
+   IAT=07744C  ?Localize_Str@@YAXVCStr@@PAGH@Z
+   IAT=077458  ?Localize_Str@@YAXPBDPAGH@Z
+   IAT=07745C  ?Localize_Str@@YAXPBGPAGH@Z
+   IAT=0774D4  ?Attrib_TextureID@CRC_Core@@UAEXHH@Z
+   IAT=0775C8  ?Texture_MakeAllDirty@CRC_Core@@UAEXH@Z

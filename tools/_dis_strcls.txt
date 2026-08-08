@@ -1,0 +1,220 @@
+## I:\SteamLibrary\steamapps\common\Enclave\MSystem.dll  imgbase=10000000  RVA 0767A-07820
+========================================================================================
+0767A  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+0767D  85 c0                    test    eax, eax                          
+0767F  74 0f                    je      0x7690                            
+07681  66 8b 08                 mov     cx, word ptr [eax]                
+07684  f6 c5 a0                 test    ch, 0xa0                          
+07687  75 07                    jne     0x7690                            
+07689  8d 48 02                 lea     ecx, [eax + 2]                    
+0768C  85 c9                    test    ecx, ecx                          
+0768E  75 06                    jne     0x7696                            
+07690  b8 b0 41 17 10           mov     eax, 0x101741b0                   
+07695  c3                       ret                                       
+07696  66 8b 08                 mov     cx, word ptr [eax]                
+07699  f6 c5 a0                 test    ch, 0xa0                          
+0769C  75 04                    jne     0x76a2                            
+0769E  83 c0 02                 add     eax, 2                            
+076A1  c3                       ret                                       
+076A2  33 c0                    xor     eax, eax                          
+076A4  c3                       ret                                       
+076A5  90                       nop                                       
+076A6  90                       nop                                       
+076A7  90                       nop                                       
+076A8  90                       nop                                       
+076A9  90                       nop                                       
+076AA  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+076AD  85 c0                    test    eax, eax                          
+076AF  74 10                    je      0x76c1                            
+076B1  66 8b 08                 mov     cx, word ptr [eax]                
+076B4  f6 c5 20                 test    ch, 0x20                          
+076B7  75 08                    jne     0x76c1                            
+076B9  84 ed                    test    ch, ch                            
+076BB  79 04                    jns     0x76c1                            
+076BD  83 c0 02                 add     eax, 2                            
+076C0  c3                       ret                                       
+076C1  33 c0                    xor     eax, eax                          
+076C3  c3                       ret                                       
+076C4  90                       nop                                       
+076C5  90                       nop                                       
+076C6  90                       nop                                       
+076C7  90                       nop                                       
+076C8  90                       nop                                       
+076C9  90                       nop                                       
+076CA  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+076CD  85 c0                    test    eax, eax                          
+076CF  74 10                    je      0x76e1                            
+076D1  66 8b 08                 mov     cx, word ptr [eax]                
+076D4  f6 c5 20                 test    ch, 0x20                          
+076D7  75 08                    jne     0x76e1                            
+076D9  84 ed                    test    ch, ch                            
+076DB  79 04                    jns     0x76e1                            
+076DD  83 c0 02                 add     eax, 2                            
+076E0  c3                       ret                                       
+076E1  33 c0                    xor     eax, eax                          
+076E3  c3                       ret                                       
+076E4  90                       nop                                       
+076E5  90                       nop                                       
+076E6  90                       nop                                       
+076E7  90                       nop                                       
+076E8  90                       nop                                       
+076E9  90                       nop                                       
+076EA  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+076ED  85 c0                    test    eax, eax                          
+076EF  74 10                    je      0x7701                            
+076F1  66 8b 08                 mov     cx, word ptr [eax]                
+076F4  f6 c5 20                 test    ch, 0x20                          
+076F7  75 08                    jne     0x7701                            
+076F9  84 ed                    test    ch, ch                            
+076FB  79 04                    jns     0x7701                            
+076FD  83 c0 02                 add     eax, 2                            
+07700  c3                       ret                                       
+07701  33 c0                    xor     eax, eax                          
+07703  c3                       ret                                       
+07704  90                       nop                                       
+07705  90                       nop                                       
+07706  90                       nop                                       
+07707  90                       nop                                       
+07708  90                       nop                                       
+07709  90                       nop                                       
+0770A  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+0770D  85 c0                    test    eax, eax                          
+0770F  74 10                    je      0x7721                            
+07711  66 8b 08                 mov     cx, word ptr [eax]                
+07714  f6 c5 20                 test    ch, 0x20                          
+07717  75 08                    jne     0x7721                            
+07719  84 ed                    test    ch, ch                            
+0771B  79 04                    jns     0x7721                            
+0771D  83 c0 02                 add     eax, 2                            
+07720  c3                       ret                                       
+07721  33 c0                    xor     eax, eax                          
+07723  c3                       ret                                       
+07724  90                       nop                                       
+07725  90                       nop                                       
+07726  90                       nop                                       
+07727  90                       nop                                       
+07728  90                       nop                                       
+07729  90                       nop                                       
+0772A  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+0772D  85 c0                    test    eax, eax                          
+0772F  74 13                    je      0x7744                            
+07731  66 8b 08                 mov     cx, word ptr [eax]                
+07734  f6 c5 20                 test    ch, 0x20                          
+07737  75 0b                    jne     0x7744                            
+07739  84 ed                    test    ch, ch                            
+0773B  79 07                    jns     0x7744                            
+0773D  8d 48 02                 lea     ecx, [eax + 2]                    
+07740  85 c9                    test    ecx, ecx                          
+07742  75 06                    jne     0x774a                            
+07744  b8 cc 41 17 10           mov     eax, 0x101741cc                   
+07749  c3                       ret                                       
+0774A  66 8b 08                 mov     cx, word ptr [eax]                
+0774D  f6 c5 20                 test    ch, 0x20                          
+07750  75 08                    jne     0x775a                            
+07752  84 ed                    test    ch, ch                            
+07754  79 04                    jns     0x775a                            
+07756  83 c0 02                 add     eax, 2                            
+07759  c3                       ret                                       
+0775A  33 c0                    xor     eax, eax                          
+0775C  c3                       ret                                       
+0775D  90                       nop                                       
+0775E  90                       nop                                       
+0775F  90                       nop                                       
+07760  90                       nop                                       
+07761  90                       nop                                       
+07762  90                       nop                                       
+07763  90                       nop                                       
+07764  90                       nop                                       
+07765  90                       nop                                       
+07766  90                       nop                                       
+07767  90                       nop                                       
+07768  90                       nop                                       
+07769  90                       nop                                       
+0776A  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+0776D  85 c0                    test    eax, eax                          
+0776F  74 1c                    je      0x778d                            
+07771  f6 40 01 80              test    byte ptr [eax + 1], 0x80          
+07775  74 0b                    je      0x7782                            
+07777  8b 4c 24 04              mov     ecx, dword ptr [esp + 4]          
+0777B  8d 44 48 02              lea     eax, [eax + ecx*2 + 2]            
+0777F  c2 04 00                 ret     4                                 
+07782  8b 54 24 04              mov     edx, dword ptr [esp + 4]          
+07786  8d 44 10 02              lea     eax, [eax + edx + 2]              
+0778A  c2 04 00                 ret     4                                 
+0778D  33 c0                    xor     eax, eax                          
+0778F  c2 04 00                 ret     4                                 
+07792  90                       nop                                       
+07793  90                       nop                                       
+07794  90                       nop                                       
+07795  90                       nop                                       
+07796  90                       nop                                       
+07797  90                       nop                                       
+07798  90                       nop                                       
+07799  90                       nop                                       
+0779A  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+0779D  85 c0                    test    eax, eax                          
+0779F  74 1c                    je      0x77bd                            
+077A1  f6 40 01 80              test    byte ptr [eax + 1], 0x80          
+077A5  74 0b                    je      0x77b2                            
+077A7  8b 4c 24 04              mov     ecx, dword ptr [esp + 4]          
+077AB  8d 44 48 02              lea     eax, [eax + ecx*2 + 2]            
+077AF  c2 04 00                 ret     4                                 
+077B2  8b 54 24 04              mov     edx, dword ptr [esp + 4]          
+077B6  8d 44 10 02              lea     eax, [eax + edx + 2]              
+077BA  c2 04 00                 ret     4                                 
+077BD  33 c0                    xor     eax, eax                          
+077BF  c2 04 00                 ret     4                                 
+077C2  90                       nop                                       
+077C3  90                       nop                                       
+077C4  90                       nop                                       
+077C5  90                       nop                                       
+077C6  90                       nop                                       
+077C7  90                       nop                                       
+077C8  90                       nop                                       
+077C9  90                       nop                                       
+077CA  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+077CD  85 c0                    test    eax, eax                          
+077CF  75 06                    jne     0x77d7                            
+077D1  b8 01 00 00 00           mov     eax, 1                            
+077D6  c3                       ret                                       
+077D7  66 8b 00                 mov     ax, word ptr [eax]                
+077DA  66 f7 d0                 not     ax                                
+077DD  0f b7 c0                 movzx   eax, ax                           
+077E0  c1 e8 0f                 shr     eax, 0xf                          
+077E3  c3                       ret                                       
+077E4  90                       nop                                       
+077E5  90                       nop                                       
+077E6  90                       nop                                       
+077E7  90                       nop                                       
+077E8  90                       nop                                       
+077E9  90                       nop                                       
+077EA  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+077ED  85 c0                    test    eax, eax                          
+077EF  75 06                    jne     0x77f7                            
+077F1  b8 01 00 00 00           mov     eax, 1                            
+077F6  c3                       ret                                       
+077F7  0f b7 00                 movzx   eax, word ptr [eax]               
+077FA  c1 e8 0f                 shr     eax, 0xf                          
+077FD  c3                       ret                                       
+077FE  90                       nop                                       
+077FF  90                       nop                                       
+07800  90                       nop                                       
+07801  90                       nop                                       
+07802  90                       nop                                       
+07803  90                       nop                                       
+07804  90                       nop                                       
+07805  90                       nop                                       
+07806  90                       nop                                       
+07807  90                       nop                                       
+07808  90                       nop                                       
+07809  90                       nop                                       
+0780A  8b 41 04                 mov     eax, dword ptr [ecx + 4]          
+0780D  85 c0                    test    eax, eax                          
+0780F  74 08                    je      0x7819                            
+07811  66 8b 08                 mov     cx, word ptr [eax]                
+07814  f6 c5 20                 test    ch, 0x20                          
+07817  74 03                    je      0x781c                            
+07819  33 c0                    xor     eax, eax                          
+0781B  c3                       ret                                       
+0781C  84 ed                    test    ch, ch                            
+0781E  79 19                    jns     0x7839                            

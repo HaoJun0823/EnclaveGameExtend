@@ -1,5 +1,16 @@
 ﻿// ============================================================================
-//  EnclaveCJK  v16f   (2026-08-08，GBK 路线证伪 → 回到宽数据，改为绕过 strlen)
+//  EnclaveCJK  v16g   (2026-08-08，v16f 里程碑基础上修闪烁 + 残留句尾 @)
+// ============================================================================
+//  v16f 已确认【全链路保宽 UTF-16LE】路线成立（攀/一/需 等低字节 0x00 汉字整句
+//  正常显示）。残留缺陷：① 字幕闪烁（时有时无）② 句尾仍偶发 @。
+//  根因：登记表 g_len 被高频纯 ASCII 噪声（SND: 音效名等，在字幕区间 0x8E362
+//  内）刷爆 —— 每帧 len_put 轮转清空 12 槽，字幕登记被挤出 → hook5 查不到 → 回落
+//  裸 strlen → 半截 + 句尾 @（即"闪烁"）。
+//  v16g 修法（不动已验证的保宽构造路径）：
+//    ① len_put 未命中且对象不在表中时不再占用/轮转槽位；
+//    ② cjk_concat_finish / tfstr_cjk_wide 对纯 ASCII 资源名直接放行，不登记、不写日志；
+//    ③ LEN_SLOTS 12 → 32。
+//  效果：32 槽专供真实字幕，噪声零占用 → hook5 稳定命中 → 闪烁与句尾 @ 消失。
 // ============================================================================
 //  背景：v18~v20.2 一路激进改渲染路径，全部失败并造成倒退。本版【停止试探】，
 //        回到 v15b 已验证可用的三 hook 架构，只做定点修正。
@@ -83,7 +94,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v16f"
+#define CJK_VERSION "v16h"
 
 #include "pch.h"
 
@@ -100,10 +111,13 @@ static DWORD    g_gwBase     = 0;
 static BYTE     g_origBytes[8];
 static DWORD    g_retVA      = 0;
 static DWORD    g_thunkVA    = 0;
+static DWORD    g_postVA     = 0;   // ★ v16h：Localize_Str 返回后处理器地址
 static BOOL     g_hooked     = FALSE;
 static volatile LONG g_hits      = 0;
 static volatile LONG g_subHits   = 0;
 static volatile LONG g_uiHits    = 0;
+static volatile LONG g_postHits  = 0;   // ★ v16h：后处理命中数
+static volatile LONG g_keyFixed  = 0;   // ★ v16h：全角化的字符数（§L 展开产物）
 
 static void log_msg(const char* fmt, ...)
 {
@@ -438,8 +452,124 @@ done_proc:
         inc eax
         mov g_hits, eax
         popad
-        push g_retVA
+        ; ★ v16h：不再直接返回 0x20FB7，而是先回到后处理器
+        ;   （§L 宏由 Localize_Str 内部展开，展开产物是半角 ASCII 按键名，
+        ;     必须在 Localize_Str **返回后**才能全角化 —— 见 cjk_post_trampoline_impl）
+        push g_postVA
         jmp dword ptr [g_thunkVA]
+    }
+}
+
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★ v16h：§L 宏展开产物全角化（2026-08-08）——教程文本 "按@@@@来拔出武器" 根治
+//
+// 【根因（静态反汇编定案）】
+//   .xrg 原文：  按 §LTUTORIAL_WEAPON 取出武器。
+//   hook 时机：  0x20FB2 是 `call Localize_Str` **之前**，此刻缓冲里还是字面量 §LTUTORIAL_WEAPON。
+//   pre-pass（process_subtitle_text 第 236-237 行）**故意跳过键名 ASCII 不全角化** —— 这是对的，
+//     因为 MSystem 的 Localize_SubstituteKeys(0x10AA20) 要 `cmp cx,0xA7` / `cmp ecx,0x4C` 匹配
+//     再拿窄 ASCII 键名 "TUTORIAL_WEAPON" 去 stringtable 查表；全角化了就查不到。
+//   随后 Localize_Str 把 §LTUTORIAL_WEAPON 展开成【玩家实际绑定的按键显示名】写进 out 缓冲，
+//     而按键名来自 Enclave.exe 内嵌 CONFIG 的 bind 参数 —— **半角 ASCII**（如 SPACE / CTRL / E）。
+//   汉化字库（1931 字集）**没有半角 ASCII 字形** —— 这正是 pre-pass 要做全角化的原因。
+//   → 展开出来的按键名每个字符都无字形 → 逐字回落 '@' → "按@@@@来拔出武器@@@"
+//
+// 【结论】可修复。不是引擎 bug，是我们的全角化跑在了展开之前。
+// 【修法】在 Localize_Str **返回后**对 out 缓冲补做一次全角化。
+//
+// 【失败安全】本函数只做【原地等长改写】，不移动、不扩长、不写终止符：
+//   - § 控制序列（§Z22 字号等）原样跳过，绝不改动 → 不会破坏渲染器的 § 解析
+//   - 看不懂的字节形态一律不动 → 最坏退化成"和今天一样"，不会更差
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+#define POST_MAX_WORDS 1000     // out 缓冲 cap = 0x3FF 字符，留余量
+
+static void __declspec(noinline) safe_fullwidth_expanded(DWORD outPtr)
+{
+    __try
+    {
+        if (outPtr < 0x10000 || outPtr > 0x7FFEFFFF) return;
+        WORD* out = (WORD*)outPtr;
+        // 取证快照（改写前），只记前若干条
+        static volatile LONG s_postLog = 0;
+        LONG n = InterlockedIncrement(&s_postLog);
+        int hasAscii = 0;
+        for (int k = 0; k < POST_MAX_WORDS && out[k] != 0; k++)
+            if (out[k] >= 0x21 && out[k] <= 0x7E) { hasAscii = 1; break; }
+
+        int i = 0, fixed = 0;
+        while (i < POST_MAX_WORDS)
+        {
+            WORD w = out[i];
+            if (w == 0) break;
+            if (w == 0x00A7)                    // § 控制码 → 原样跳过（§Z22 / §C… 字号颜色）
+            {
+                i++;
+                if (i >= POST_MAX_WORDS || out[i] == 0) break;
+                i++;                                                        // 码字母（Z/C/…）
+                while (i < POST_MAX_WORDS && out[i] >= 0x30 && out[i] <= 0x39) i++;  // 数字参数
+                continue;
+            }
+            if (w >= 0x21 && w <= 0x7E) { out[i] = (WORD)(w + 0xFEE0); fixed++; }  // 半角 → 全角
+            else if (w == 0x20)         { out[i] = 0x3000;             fixed++; }  // 半角空格 → 全角
+            i++;
+        }
+        if (fixed) InterlockedExchangeAdd((volatile LONG*)&g_keyFixed, fixed);
+
+        // ★ 取证：只记"改写前含半角 ASCII"的帧（= §L 展开产物 / 漏网 ASCII），前 40 条
+        if (hasAscii && n <= 400)
+        {
+            char buf[1024];
+            char* p = buf;
+            p += wsprintfA(p, "[POST %ld] out=%08X len=%d fixed=%d\n", n, outPtr, i, fixed);
+            for (int k = 0; k < 72 && k < i; k++)
+                p += wsprintfA(p, "%04X ", (unsigned)out[k]);
+            p += wsprintfA(p, "\n");
+            HANDLE h = CreateFileA("CJK_post_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                   NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+            if (h != INVALID_HANDLE_VALUE)
+            {
+                SetFilePointer(h, 0, NULL, FILE_END);
+                DWORD written;
+                WriteFile(h, buf, (DWORD)(p - buf), &written, NULL);
+                CloseHandle(h);
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+}
+
+// ★ v16h 后处理 trampoline
+//   进入时 esp == 调用点 esp（Localize_Str 是 __cdecl，ret 已弹掉自己的返回地址）：
+//       [esp+0x00..07] = CStr 按值（8 字节）
+//       [esp+0x08]     = wchar_t* out   ← 我们要修的展开结果
+//       [esp+0x0C]     = int cap (0x3FF)
+//       [esp+0x4884]   = 外层函数返回地址（调用者判据，与前置 trampoline 同一槽）
+//   eax = Localize_Str 返回值，必须原样带回 → pushad/popad 保护
+//   收尾 push g_retVA / ret → 回到 0x20FB7（add esp,0x10 由原代码执行）
+static void __declspec(naked) cjk_post_trampoline_impl(void)
+{
+    __asm
+    {
+        pushad
+        mov eax, [esp + 0x48A4]
+        sub eax, g_gwBase
+        cmp eax, SUB_LO
+        jb  post_skip
+        cmp eax, SUB_HI
+        ja  post_skip
+        mov edx, [esp + 0x28]       ; out 缓冲指针（调用点 [esp+8]）
+        push edx
+        call safe_fullwidth_expanded
+        add esp, 4
+        mov eax, g_postHits
+        inc eax
+        mov g_postHits, eax
+post_skip:
+        popad
+        push g_retVA
+        ret
     }
 }
 
@@ -607,7 +737,7 @@ static void stash_put(void* obj, const WORD* w, int n)
 //   这样做的好处：不改变任何数据格式（v16c 已证明引擎原生就能正确渲染
 //   「窄前缀 + UTF-16 正文」），只把被 strlen 弄错的长度纠正回来。
 // ────────────────────────────────────────────────────────────────────────
-#define LEN_SLOTS   12
+#define LEN_SLOTS   32          // v16g：噪声不再占槽，32 槽给真实字幕留足余量（原为 12）
 #define LEN_MAXB    249         // 252 内联缓冲 - 2 字节宽终止 - 1 字节余量
 
 typedef struct
@@ -628,22 +758,28 @@ static int len_find(void* obj)
     return 0;
 }
 
-// len <= 0 → 只作废旧记录。栈上的 TFStr 地址会被反复复用，不作废就会
-// 拿上一句的长度去量这一句 —— 那正是句尾冒出 @ 的经典成因。
+// ★ v16g 抗刷槽修正：未命中（len<=0）且对象【不在表中】时，绝不占用/轮转槽位。
+//   v16f 的致命缺陷：SND: 音效名（纯 ASCII、在字幕区间 0x8E362 内高频调用）
+//   每次未命中都 len_put(obj,0) → 轮转吃掉 12 槽之一 → 字幕登记被挤出 → hook5
+//   查不到 → 回落裸 strlen → 半截 + 句尾 @（表现即"闪烁"）。
+//   现在：len<=0 只清「已存在」的条目；新对象一律不占槽，槽位专供真实字幕。
 static void len_put(void* obj, int len)
 {
     int i, k = -1;
     if (!obj) return;
     for (i = 0; i < LEN_SLOTS; i++)
         if (g_len[i].obj == obj) { k = i; break; }
-    if (k < 0)
+    if (k >= 0)                       // 已存在 → 先作废（地址复用防串味）
+    {
+        g_len[k].obj = NULL;
+        g_len[k].len = 0;
+    }
+    if (len <= 0 || len > LEN_MAXB) return;   // 未命中：不占新槽
+    if (k < 0)                        // 仅新条目才轮转分配
     {
         k = g_lenNext;
         g_lenNext = (g_lenNext + 1) % LEN_SLOTS;
     }
-    g_len[k].obj = NULL;
-    g_len[k].len = 0;
-    if (len <= 0 || len > LEN_MAXB) return;
     g_len[k].len = len;
     g_len[k].obj = obj;
 }
@@ -741,9 +877,16 @@ static int __cdecl tfstr_cjk_wide(void* obj, const void* text, DWORD retRva)
     }
     else
     {
-        // 没接管 ⇒ 作废该地址的旧登记。栈对象地址会复用，留着就会用上一句的
-        // 长度去量这一句，尾部必然拖出垃圾。
-        len_put(obj, 0);
+        // 没接管：纯 ASCII（UI/资源名/格式串 "SN" 等）一律【不占槽、不写日志】——
+        // 它们是噪声，v16f 就靠它们刷爆了诊断与登记表。只有"像 CJK"（含高字节 WORD）
+        // 却没达标的未命中，才清旧登记（防栈地址复用把上一句的宽长度串到这一句）。
+        int looksCjk = 0;
+        for (i = 0; i < n && i < 16; i++)
+            if ((w[i] & 0xFF00) != 0) { looksCjk = 1; break; }
+        if (looksCjk)
+            len_put(obj, 0);
+        else
+            return 0;                       // 纯 ASCII 直接放行，跳过诊断
     }
 
     tfstr_diag(retRva, w, n, strong, hit);
@@ -970,6 +1113,34 @@ static int __cdecl cjk_concat_finish(void* dst, const BYTE* tmp, int total)
     if (!dst || !tmp) return 0;
     if (total <= 0 || total > LEN_MAXB) return 0;   // 越界一律放行，绝不冒险
 
+    // ★ v16g：纯 ASCII 资源名（SND: 等音效名）不要登记、不要重建。
+    //   它们在 [0x8D000,0x8F000] 区间内高频调用本拼接点（v16f 日志 26 条全是 SND:，
+    //   dst 恒为 001AD7B0），会把登记表刷爆 → 字幕登记被挤出 → 闪烁/句尾@。
+    //   判别：跳过窄前缀（§Z22 占前 2 个 WORD），扫描正文是否含 ≥2 个 CJK 汉字
+    //   （U+4E00–U+9FFF）。ASCII 资源名绝无 CJK → 原样走 copy-ctor（对 ASCII 本就正确）。
+    {
+        const WORD* w = (const WORD*)tmp;
+        int nw = total / 2;
+        int cjk = 0;
+        for (i = 2; i < nw && i < 132; i++)          // 跳过前缀 2 WORD，限 130 WORD 防读越界
+        {
+            WORD c = w[i];
+            if (c >= 0x4E00 && c <= 0x9FFF) { if (++cjk >= 2) break; }
+        }
+        if (cjk < 2)
+        {
+            static volatile LONG s_skip = 0;
+            if (InterlockedIncrement(&s_skip) <= 8)
+            {
+                char b[160];
+                wsprintfA(b, "[H4-SKIP] dst=%08X total=%3d | %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                          (DWORD)dst, total, tmp[0],tmp[1],tmp[2],tmp[3],tmp[4],tmp[5],tmp[6],tmp[7]);
+                diag_write(b);
+            }
+            return 0;                                // 非字幕 → 放行原 copy-ctor
+        }
+    }
+
     __try
     {
         d = (BYTE*)dst + 4;                          // TFStr<252> 数据内联在 +4
@@ -1145,6 +1316,7 @@ static BOOL install_hook(void)
     g_gwBase = (DWORD)g_hGameWorld;
     g_retVA = g_gwBase + RET_VA;
     g_thunkVA = g_gwBase + THUNK_RVA;
+    g_postVA = (DWORD)cjk_post_trampoline_impl;   // ★ v16h：Localize_Str 返回后处理
 
     DWORD oldProt;
     // ── 原有 hook：0x20FB2（字幕 Localize_Str 判据）──
@@ -1250,9 +1422,9 @@ static BOOL install_hook(void)
     }
 
     log_msg("[CJK] EnclaveCJK " CJK_VERSION " Hook 安装成功：0x%X -> %08X"
-            " (base=%08X, tfstr=%d, clen=%d, cfin=%d, dlen=%d)\n",
+            " (base=%08X, tfstr=%d, clen=%d, cfin=%d, dlen=%d, post=%08X)\n",
             HOOK_RVA, (DWORD)hook, g_gwBase, g_hookedTfstr, g_hookedConcatLen,
-            g_hookedConcatFin, g_hookedDrawLen);
+            g_hookedConcatFin, g_hookedDrawLen, g_postVA);
     return TRUE;
 }
 

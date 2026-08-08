@@ -1,0 +1,58 @@
+## I:\SteamLibrary\steamapps\common\Enclave\MSystem.dll  imgbase=10000000  RVA 044EA-04560
+========================================================================================
+044EA  8b 44 24 0c              mov     eax, dword ptr [esp + 0xc]        
+044EE  85 c0                    test    eax, eax                          
+044F0  7e 4e                    jle     0x4540                            
+044F2  53                       push    ebx                               
+044F3  55                       push    ebp                               
+044F4  8b 6c 24 10              mov     ebp, dword ptr [esp + 0x10]       
+044F8  56                       push    esi                               
+044F9  57                       push    edi                               
+044FA  8b 7c 24 14              mov     edi, dword ptr [esp + 0x14]       
+044FE  8b f1                    mov     esi, ecx                          
+04500  2b f9                    sub     edi, ecx                          
+04502  8b d8                    mov     ebx, eax                          
+04504  33 c0                    xor     eax, eax                          
+04506  85 ed                    test    ebp, ebp                          
+04508  75 06                    jne     0x4510                            
+0450A  0f b6 04 0f              movzx   eax, byte ptr [edi + ecx]         
+0450E  eb 09                    jmp     0x4519                            
+04510  83 fd 01                 cmp     ebp, 1                            
+04513  75 04                    jne     0x4519                            
+04515  0f b7 04 37              movzx   eax, word ptr [edi + esi]         
+04519  85 d2                    test    edx, edx                          
+0451B  75 10                    jne     0x452d                            
+0451D  3d ff 00 00 00           cmp     eax, 0xff                         
+04522  7e 05                    jle     0x4529                            
+04524  b8 3f 00 00 00           mov     eax, 0x3f                         
+04529  88 01                    mov     byte ptr [ecx], al                
+0452B  eb 08                    jmp     0x4535                            
+0452D  83 fa 01                 cmp     edx, 1                            
+04530  75 03                    jne     0x4535                            
+04532  66 89 06                 mov     word ptr [esi], ax                
+04535  41                       inc     ecx                               
+04536  83 c6 02                 add     esi, 2                            
+04539  4b                       dec     ebx                               
+0453A  75 c8                    jne     0x4504                            
+0453C  5f                       pop     edi                               
+0453D  5e                       pop     esi                               
+0453E  5d                       pop     ebp                               
+0453F  5b                       pop     ebx                               
+04540  c2 0c 00                 ret     0xc                               
+04543  90                       nop                                       
+04544  90                       nop                                       
+04545  90                       nop                                       
+04546  90                       nop                                       
+04547  90                       nop                                       
+04548  90                       nop                                       
+04549  90                       nop                                       
+0454A  33 c0                    xor     eax, eax                          
+0454C  8a c1                    mov     al, cl                            
+0454E  3c 41                    cmp     al, 0x41                          
+04550  72 04                    jb      0x4556                            
+04552  3c 5a                    cmp     al, 0x5a                          
+04554  76 08                    jbe     0x455e                            
+04556  3c c0                    cmp     al, 0xc0                          
+04558  72 07                    jb      0x4561                            
+0455A  3c de                    cmp     al, 0xde                          
+0455C  77 03                    ja      0x4561                            

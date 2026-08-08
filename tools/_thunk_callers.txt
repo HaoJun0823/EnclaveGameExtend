@@ -1,0 +1,40 @@
+############################################################################################
+## GameWorld.dll   .text RVA=001000 size=13D000
+############################################################################################
+
+-- Localize_Str(CStr src, wide* dst, int)     thunk=1005C4  callers=9
+     call @ RVA 020FB2   <<== 0x20FB2 hook区
+     call @ RVA 021942
+     call @ RVA 021E9B
+     call @ RVA 03319F
+     call @ RVA 0334CF
+     call @ RVA 05E3AF
+     call @ RVA 05E6DF
+     call @ RVA 0E3D37
+     call @ RVA 0E3E37
+
+-- Localize_Str(NARROW src, wide* dst, int)   thunk=1005D6  callers=1
+     call @ RVA 021D6D
+
+-- Localize_Str(WIDE  src, wide* dst, int)    thunk=1005DC  callers=1
+     call @ RVA 021DED
+
+-- Localize_Str(CStr)->CStr                   thunk=1005FA  callers=1
+     call @ RVA 03BDC2
+
+-- Localize_FindKeyValue                      thunk=100636  callers=1
+     call @ RVA 08DDA6   <<== 字幕绘制区
+############################################################################################
+## Enclave.exe   .text RVA=001000 size=76000
+############################################################################################
+
+-- Localize_Str(CStr src, wide* dst, int)     thunk=0495AE  callers=3
+     call @ RVA 02ECD2
+     call @ RVA 02F662
+     call @ RVA 02FBBB
+
+-- Localize_Str(NARROW src, wide* dst, int)   thunk=0495C0  callers=1
+     call @ RVA 02FA8D
+
+-- Localize_Str(WIDE  src, wide* dst, int)    thunk=0495C6  callers=1
+     call @ RVA 02FB0D

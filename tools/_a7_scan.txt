@@ -1,0 +1,27 @@
+
+##########################################################################################
+## I:\SteamLibrary\steamapps\common\Enclave\Sbz1\GameWorld.dll  imgbase=10000000
+##########################################################################################
+-- section .text rva=001000 size=13C770
+  CMP    07EC6  80 fb a7             cmp bl, 0xa7                      => NARROW(bl)
+  CMP    08BE6  80 fb a7             cmp bl, 0xa7                      => NARROW(bl)
+  CMP    08C72  66 81 3c 51 a7 00    cmp word ptr [ecx + edx*2], 0xa7  => WIDE(word ptr)
+   (hits=3)
+-- section .patch rva=1D0000 size=001000
+   (hits=0)
+
+##########################################################################################
+## I:\SteamLibrary\steamapps\common\Enclave\MSystem.dll  imgbase=10000000
+##########################################################################################
+-- section .text rva=001000 size=117960
+   (hits=0)
+-- section BINK rva=119000 size=0024F0
+   (hits=0)
+-- section .patch rva=2E4000 size=001000
+   (hits=0)
+
+##########################################################################################
+## I:\SteamLibrary\steamapps\common\Enclave\Sbz1\GameClasses.dll  imgbase=10000000
+##########################################################################################
+-- section .text rva=001000 size=1A53C0
+   (hits=0)

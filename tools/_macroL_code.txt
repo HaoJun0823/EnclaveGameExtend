@@ -1,0 +1,88 @@
+DLL=I:\SteamLibrary\steamapps\common\Enclave\Sbz1\GameWorld.dll imgbase=10000000 range=08C40-08D00
+==========================================================================================
+### 关注点 (1)
+MACRO?  08C72  66 81 3c 51 a7 00      cmp word ptr [ecx + edx*2], 0xa7
+
+==========================================================================================
+### 全量反汇编 (81 条)
+08C40  03 03                  add eax, dword ptr [ebx]
+08C42  03 03                  add eax, dword ptr [ebx]
+08C44  03 03                  add eax, dword ptr [ebx]
+08C46  03 01                  add eax, dword ptr [ecx]
+08C48  01 02                  add dword ptr [edx], eax
+08C4A  03 03                  add eax, dword ptr [ebx]
+08C4C  03 03                  add eax, dword ptr [ebx]
+08C4E  03 03                  add eax, dword ptr [ebx]
+08C50  00 03                  add byte ptr [ebx], al
+08C52  01 00                  add dword ptr [eax], eax
+08C54  03 03                  add eax, dword ptr [ebx]
+08C56  03 03                  add eax, dword ptr [ebx]
+08C58  03 03                  add eax, dword ptr [ebx]
+08C5A  03 03                  add eax, dword ptr [ebx]
+08C5C  03 03                  add eax, dword ptr [ebx]
+08C5E  03 03                  add eax, dword ptr [ebx]
+08C60  03 03                  add eax, dword ptr [ebx]
+08C62  03 03                  add eax, dword ptr [ebx]
+08C64  03 03                  add eax, dword ptr [ebx]
+08C66  03 01                  add eax, dword ptr [ecx]
+08C68  01 02                  add dword ptr [edx], eax
+08C6A  90                     nop 
+08C6B  90                     nop 
+08C6C  90                     nop 
+08C6D  90                     nop 
+08C6E  90                     nop 
+08C6F  90                     nop 
+08C70  33 c0                  xor eax, eax
+08C72  66 81 3c 51 a7 00      cmp word ptr [ecx + edx*2], 0xa7
+08C78  75 31                  jne 0x8cab
+08C7A  0f be 4c 51 02         movsx ecx, byte ptr [ecx + edx*2 + 2]
+08C7F  83 c1 bf               add ecx, -0x41
+08C82  83 f9 39               cmp ecx, 0x39
+08C85  b8 01 00 00 00         mov eax, 1
+08C8A  77 1f                  ja 0x8cab
+08C8C  0f b6 89 bc 8c 00 10   movzx ecx, byte ptr [ecx + 0x10008cbc]
+08C93  ff 24 8d ac 8c 00 10   jmp dword ptr [ecx*4 + 0x10008cac]
+08C9A  b8 03 00 00 00         mov eax, 3
+08C9F  c3                     ret 
+08CA0  b8 04 00 00 00         mov eax, 4
+08CA5  c3                     ret 
+08CA6  b8 05 00 00 00         mov eax, 5
+08CAB  c3                     ret 
+08CAC  9a 8c 00 10 a6 8c 00   lcall 0x8c, 0xa610008c
+08CB3  10 a0 8c 00 10 ab      adc byte ptr [eax - 0x54efff74], ah
+08CB9  8c 00                  mov word ptr [eax], es
+08CBB  10 00                  adc byte ptr [eax], al
+08CBD  03 01                  add eax, dword ptr [ecx]
+08CBF  00 03                  add byte ptr [ebx], al
+08CC1  03 03                  add eax, dword ptr [ebx]
+08CC3  03 03                  add eax, dword ptr [ebx]
+08CC5  03 03                  add eax, dword ptr [ebx]
+08CC7  03 03                  add eax, dword ptr [ebx]
+08CC9  03 03                  add eax, dword ptr [ebx]
+08CCB  03 03                  add eax, dword ptr [ebx]
+08CCD  03 03                  add eax, dword ptr [ebx]
+08CCF  03 03                  add eax, dword ptr [ebx]
+08CD1  03 03                  add eax, dword ptr [ebx]
+08CD3  01 01                  add dword ptr [ecx], eax
+08CD5  02 03                  add al, byte ptr [ebx]
+08CD7  03 03                  add eax, dword ptr [ebx]
+08CD9  03 03                  add eax, dword ptr [ebx]
+08CDB  03 00                  add eax, dword ptr [eax]
+08CDD  03 01                  add eax, dword ptr [ecx]
+08CDF  00 03                  add byte ptr [ebx], al
+08CE1  03 03                  add eax, dword ptr [ebx]
+08CE3  03 03                  add eax, dword ptr [ebx]
+08CE5  03 03                  add eax, dword ptr [ebx]
+08CE7  03 03                  add eax, dword ptr [ebx]
+08CE9  03 03                  add eax, dword ptr [ebx]
+08CEB  03 03                  add eax, dword ptr [ebx]
+08CED  03 03                  add eax, dword ptr [ebx]
+08CEF  03 03                  add eax, dword ptr [ebx]
+08CF1  03 03                  add eax, dword ptr [ebx]
+08CF3  01 01                  add dword ptr [ecx], eax
+08CF5  02 90 90 90 90 90      add dl, byte ptr [eax - 0x6f6f6f70]
+08CFB  90                     nop 
+08CFC  90                     nop 
+08CFD  90                     nop 
+08CFE  90                     nop 
+08CFF  90                     nop 

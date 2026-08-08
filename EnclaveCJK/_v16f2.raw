@@ -1,0 +1,2389 @@
+
+Dump of file dllmain.obj
+
+File Type: COFF OBJECT
+
+?cjk_concat_fin_trampoline_impl@@YAXXZ (void __cdecl cjk_concat_fin_trampoline_impl(void)):
+  00000000: 60                 pushad
+  00000001: 8B 4D 04           mov         ecx,dword ptr [ebp+4]
+  00000004: 2B 0D 00 00 00 00  sub         ecx,dword ptr [?g_gwBase@@3KA]
+  0000000A: 81 F9 00 D0 08 00  cmp         ecx,8D000h
+  00000010: 72 2C              jb          0000003E
+  00000012: 81 F9 00 F0 08 00  cmp         ecx,8F000h
+  00000018: 77 24              ja          0000003E
+  0000001A: 8D 4C 24 34        lea         ecx,[esp+34h]
+  0000001E: 50                 push        eax
+  0000001F: 51                 push        ecx
+  00000020: FF 75 08           push        dword ptr [ebp+8]
+  00000023: E8 00 00 00 00     call        ?cjk_concat_finish@@YAHPAXPBEH@Z
+  00000028: 83 C4 0C           add         esp,0Ch
+  0000002B: 85 C0              test        eax,eax
+  0000002D: 74 0F              je          0000003E
+  0000002F: 61                 popad
+  00000030: 8B 15 00 00 00 00  mov         edx,dword ptr [?g_gwBase@@3KA]
+  00000036: 81 C2 AB ED 08 00  add         edx,8EDABh
+  0000003C: FF E2              jmp         edx
+  0000003E: 61                 popad
+  0000003F: C6 44 04 14 00     mov         byte ptr [esp+eax+14h],0
+  00000044: 8B 15 00 00 00 00  mov         edx,dword ptr [?g_gwBase@@3KA]
+  0000004A: 81 C2 9F ED 08 00  add         edx,8ED9Fh
+  00000050: FF E2              jmp         edx
+
+?cjk_concat_finish@@YAHPAXPBEH@Z (int __cdecl cjk_concat_finish(void *,unsigned char const *,int)):
+  00000000: 55                 push        ebp
+  00000001: 8B EC              mov         ebp,esp
+  00000003: 6A FE              push        0FFFFFFFEh
+  00000005: 68 00 00 00 00     push        offset __sehtable$?cjk_concat_finish@@YAHPAXPBEH@Z
+  0000000A: 68 00 00 00 00     push        offset __except_handler4
+  0000000F: 64 A1 00 00 00 00  mov         eax,dword ptr fs:[00000000h]
+  00000015: 50                 push        eax
+  00000016: 81 EC 14 01 00 00  sub         esp,114h
+  0000001C: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  00000021: 31 45 F8           xor         dword ptr [ebp-8],eax
+  00000024: 33 C5              xor         eax,ebp
+  00000026: 89 45 E4           mov         dword ptr [ebp-1Ch],eax
+  00000029: 53                 push        ebx
+  0000002A: 56                 push        esi
+  0000002B: 57                 push        edi
+  0000002C: 50                 push        eax
+  0000002D: 8D 45 F0           lea         eax,[ebp-10h]
+  00000030: 64 A3 00 00 00 00  mov         dword ptr fs:[00000000h],eax
+  00000036: 89 65 E8           mov         dword ptr [ebp-18h],esp
+  00000039: 8B 5D 08           mov         ebx,dword ptr [ebp+8]
+  0000003C: 8B 7D 0C           mov         edi,dword ptr [ebp+0Ch]
+  0000003F: 8B 75 10           mov         esi,dword ptr [ebp+10h]
+  00000042: 85 DB              test        ebx,ebx
+  00000044: 0F 84 20 01 00 00  je          0000016A
+  0000004A: 85 FF              test        edi,edi
+  0000004C: 0F 84 18 01 00 00  je          0000016A
+  00000052: 8D 46 FF           lea         eax,[esi-1]
+  00000055: 3D F8 00 00 00     cmp         eax,0F8h
+  0000005A: 0F 87 0A 01 00 00  ja          0000016A
+  00000060: C7 45 FC 00 00 00  mov         dword ptr [ebp-4],0
+            00
+  00000067: 33 C9              xor         ecx,ecx
+  00000069: 89 8D DC FE FF FF  mov         dword ptr [ebp-124h],ecx
+  0000006F: 3B CE              cmp         ecx,esi
+  00000071: 7D 0A              jge         0000007D
+  00000073: 8A 04 0F           mov         al,byte ptr [edi+ecx]
+  00000076: 88 44 19 04        mov         byte ptr [ecx+ebx+4],al
+  0000007A: 41                 inc         ecx
+  0000007B: EB EC              jmp         00000069
+  0000007D: 66 C7 44 1E 04 00  mov         word ptr [esi+ebx+4],0
+            00
+  00000084: A1 00 00 00 00     mov         eax,dword ptr [?g_gwBase@@3KA]
+  00000089: 05 FC 45 14 00     add         eax,1445FCh
+  0000008E: 89 03              mov         dword ptr [ebx],eax
+  00000090: 56                 push        esi
+  00000091: 53                 push        ebx
+  00000092: E8 00 00 00 00     call        ?len_put@@YAXPAXH@Z
+  00000097: 83 C4 08           add         esp,8
+  0000009A: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  000000A1: B8 01 00 00 00     mov         eax,1
+  000000A6: F0 0F C1 05 00 00  lock xadd   dword ptr [?s_c@?1??h4_diag@@YAXPAXPBEH@Z@4JC],eax
+            00 00
+  000000AE: 40                 inc         eax
+  000000AF: 83 F8 18           cmp         eax,18h
+  000000B2: 0F 8F 9B 00 00 00  jg          00000153
+  000000B8: 83 FE 01           cmp         esi,1
+  000000BB: 7C 0F              jl          000000CC
+  000000BD: 8D 04 3E           lea         eax,[esi+edi]
+  000000C0: 0F B6 48 FF        movzx       ecx,byte ptr [eax-1]
+  000000C4: 89 8D E0 FE FF FF  mov         dword ptr [ebp-120h],ecx
+  000000CA: EB 0D              jmp         000000D9
+  000000CC: C7 85 E0 FE FF FF  mov         dword ptr [ebp-120h],0
+            00 00 00 00
+  000000D6: 8D 04 37           lea         eax,[edi+esi]
+  000000D9: 83 FE 02           cmp         esi,2
+  000000DC: 7C 06              jl          000000E4
+  000000DE: 0F B6 50 FE        movzx       edx,byte ptr [eax-2]
+  000000E2: EB 02              jmp         000000E6
+  000000E4: 33 D2              xor         edx,edx
+  000000E6: 83 FE 03           cmp         esi,3
+  000000E9: 7C 06              jl          000000F1
+  000000EB: 0F B6 48 FD        movzx       ecx,byte ptr [eax-3]
+  000000EF: EB 02              jmp         000000F3
+  000000F1: 33 C9              xor         ecx,ecx
+  000000F3: 83 FE 04           cmp         esi,4
+  000000F6: 7C 06              jl          000000FE
+  000000F8: 0F B6 40 FC        movzx       eax,byte ptr [eax-4]
+  000000FC: EB 02              jmp         00000100
+  000000FE: 33 C0              xor         eax,eax
+  00000100: FF B5 E0 FE FF FF  push        dword ptr [ebp-120h]
+  00000106: 52                 push        edx
+  00000107: 51                 push        ecx
+  00000108: 50                 push        eax
+  00000109: 0F B6 47 07        movzx       eax,byte ptr [edi+7]
+  0000010D: 50                 push        eax
+  0000010E: 0F B6 47 06        movzx       eax,byte ptr [edi+6]
+  00000112: 50                 push        eax
+  00000113: 0F B6 47 05        movzx       eax,byte ptr [edi+5]
+  00000117: 50                 push        eax
+  00000118: 0F B6 47 04        movzx       eax,byte ptr [edi+4]
+  0000011C: 50                 push        eax
+  0000011D: 0F B6 47 03        movzx       eax,byte ptr [edi+3]
+  00000121: 50                 push        eax
+  00000122: 0F B6 47 02        movzx       eax,byte ptr [edi+2]
+  00000126: 50                 push        eax
+  00000127: 0F B6 47 01        movzx       eax,byte ptr [edi+1]
+  0000012B: 50                 push        eax
+  0000012C: 0F B6 07           movzx       eax,byte ptr [edi]
+  0000012F: 50                 push        eax
+  00000130: 56                 push        esi
+  00000131: 53                 push        ebx
+  00000132: 68 00 00 00 00     push        offset ??_C@_0FP@JBIGLCHA@?$FLH4?$FN?5dst?$DN?$CF08X?5total?$DN?$CF3d?5?$HM?5?$CF02X?5@
+  00000137: 8D 8D E4 FE FF FF  lea         ecx,[ebp-11Ch]
+  0000013D: 51                 push        ecx
+  0000013E: FF 15 00 00 00 00  call        dword ptr [__imp__wsprintfA]
+  00000144: 8D 8D E4 FE FF FF  lea         ecx,[ebp-11Ch]
+  0000014A: 51                 push        ecx
+  0000014B: E8 00 00 00 00     call        ?diag_write@@YAXPBD@Z
+  00000150: 83 C4 44           add         esp,44h
+  00000153: B8 01 00 00 00     mov         eax,1
+  00000158: EB 12              jmp         0000016C
+$LN12:
+  0000015A: B8 01 00 00 00     mov         eax,1
+$LN14:
+  0000015F: C3                 ret
+$LN13:
+  00000160: 8B 65 E8           mov         esp,dword ptr [ebp-18h]
+  00000163: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  0000016A: 33 C0              xor         eax,eax
+  0000016C: 8B 4D F0           mov         ecx,dword ptr [ebp-10h]
+  0000016F: 64 89 0D 00 00 00  mov         dword ptr fs:[0],ecx
+            00
+  00000176: 59                 pop         ecx
+  00000177: 5F                 pop         edi
+  00000178: 5E                 pop         esi
+  00000179: 5B                 pop         ebx
+  0000017A: 8B 4D E4           mov         ecx,dword ptr [ebp-1Ch]
+  0000017D: 33 CD              xor         ecx,ebp
+  0000017F: E8 00 00 00 00     call        @__security_check_cookie@4
+  00000184: 8B E5              mov         esp,ebp
+  00000186: 5D                 pop         ebp
+  00000187: C3                 ret
+
+?cjk_concat_len_trampoline_impl@@YAXXZ (void __cdecl cjk_concat_len_trampoline_impl(void)):
+  00000000: FF 52 64           call        dword ptr [edx+64h]
+  00000003: 8B F8              mov         edi,eax
+  00000005: 60                 pushad
+  00000006: 8B 45 04           mov         eax,dword ptr [ebp+4]
+  00000009: 2B 05 00 00 00 00  sub         eax,dword ptr [?g_gwBase@@3KA]
+  0000000F: 3D 00 D0 08 00     cmp         eax,8D000h
+  00000014: 72 28              jb          0000003E
+  00000016: 3D 00 F0 08 00     cmp         eax,8F000h
+  0000001B: 77 21              ja          0000003E
+  0000001D: FC                 cld
+  0000001E: 8D 7C 24 34        lea         edi,[esp+34h]
+  00000022: 33 C0              xor         eax,eax
+  00000024: B9 3F 00 00 00     mov         ecx,3Fh
+  00000029: F3 AB              rep stos    dword ptr es:[edi]
+  0000002B: FF 75 0C           push        dword ptr [ebp+0Ch]
+  0000002E: E8 00 00 00 00     call        ?cjk_text_len@@YAHPAX@Z
+  00000033: 83 C4 04           add         esp,4
+  00000036: 85 C0              test        eax,eax
+  00000038: 74 04              je          0000003E
+  0000003A: 89 44 24 1C        mov         dword ptr [esp+1Ch],eax
+  0000003E: 61                 popad
+  0000003F: 8B F8              mov         edi,eax
+  00000041: A1 00 00 00 00     mov         eax,dword ptr [?g_gwBase@@3KA]
+  00000046: 05 1F ED 08 00     add         eax,8ED1Fh
+  0000004B: FF E0              jmp         eax
+
+?cjk_draw_len@@YAHPBXK@Z (int __cdecl cjk_draw_len(void const *,unsigned long)):
+  00000000: 55                 push        ebp
+  00000001: 8B EC              mov         ebp,esp
+  00000003: 6A FE              push        0FFFFFFFEh
+  00000005: 68 00 00 00 00     push        offset __sehtable$?cjk_draw_len@@YAHPBXK@Z
+  0000000A: 68 00 00 00 00     push        offset __except_handler4
+  0000000F: 64 A1 00 00 00 00  mov         eax,dword ptr fs:[00000000h]
+  00000015: 50                 push        eax
+  00000016: 81 EC 04 01 00 00  sub         esp,104h
+  0000001C: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  00000021: 31 45 F8           xor         dword ptr [ebp-8],eax
+  00000024: 33 C5              xor         eax,ebp
+  00000026: 89 45 E4           mov         dword ptr [ebp-1Ch],eax
+  00000029: 53                 push        ebx
+  0000002A: 56                 push        esi
+  0000002B: 57                 push        edi
+  0000002C: 50                 push        eax
+  0000002D: 8D 45 F0           lea         eax,[ebp-10h]
+  00000030: 64 A3 00 00 00 00  mov         dword ptr fs:[00000000h],eax
+  00000036: 89 65 E8           mov         dword ptr [ebp-18h],esp
+  00000039: 8B 7D 08           mov         edi,dword ptr [ebp+8]
+  0000003C: 33 F6              xor         esi,esi
+  0000003E: 85 FF              test        edi,edi
+  00000040: 0F 84 07 01 00 00  je          0000014D
+  00000046: 0F 57 C0           xorps       xmm0,xmm0
+  00000049: 66 0F D6 45 D8     movq        mmword ptr [ebp-28h],xmm0
+  0000004E: 66 89 75 E0        mov         word ptr [ebp-20h],si
+  00000052: 89 75 FC           mov         dword ptr [ebp-4],esi
+  00000055: 8D 47 FC           lea         eax,[edi-4]
+  00000058: 50                 push        eax
+  00000059: E8 00 00 00 00     call        ?len_find@@YAHPAX@Z
+  0000005E: 83 C4 04           add         esp,4
+  00000061: 8B D8              mov         ebx,eax
+  00000063: 89 9D F0 FE FF FF  mov         dword ptr [ebp-110h],ebx
+  00000069: 0F 1F 80 00 00 00  nop         dword ptr [eax]
+            00
+  00000070: 81 FE FC 00 00 00  cmp         esi,0FCh
+  00000076: 7D 0F              jge         00000087
+  00000078: 80 3C 37 00        cmp         byte ptr [edi+esi],0
+  0000007C: 74 09              je          00000087
+  0000007E: 46                 inc         esi
+  0000007F: 89 B5 EC FE FF FF  mov         dword ptr [ebp-114h],esi
+  00000085: EB E9              jmp         00000070
+  00000087: 33 C9              xor         ecx,ecx
+  00000089: 89 8D F4 FE FF FF  mov         dword ptr [ebp-10Ch],ecx
+  0000008F: 83 F9 0A           cmp         ecx,0Ah
+  00000092: 7D 0A              jge         0000009E
+  00000094: 8A 04 0F           mov         al,byte ptr [edi+ecx]
+  00000097: 88 44 0D D8        mov         byte ptr [ebp+ecx-28h],al
+  0000009B: 41                 inc         ecx
+  0000009C: EB EB              jmp         00000089
+  0000009E: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  000000A5: B8 01 00 00 00     mov         eax,1
+  000000AA: F0 0F C1 05 00 00  lock xadd   dword ptr [?s_c@?1??h5_diag@@YAXKHHPBE@Z@4JC],eax
+            00 00
+  000000B2: 40                 inc         eax
+  000000B3: 83 F8 18           cmp         eax,18h
+  000000B6: 7F 73              jg          0000012B
+  000000B8: 85 DB              test        ebx,ebx
+  000000BA: 7E 11              jle         000000CD
+  000000BC: B9 00 00 00 00     mov         ecx,offset ??_C@_07BADDOMIJ@RESCUED@
+  000000C1: B8 00 00 00 00     mov         eax,offset ??_C@_04FMLAMFAK@same@
+  000000C6: 3B DE              cmp         ebx,esi
+  000000C8: 0F 4E C8           cmovle      ecx,eax
+  000000CB: EB 05              jmp         000000D2
+  000000CD: B9 00 00 00 00     mov         ecx,offset ??_C@_04EMPEPPKL@miss@
+  000000D2: 0F B6 45 E1        movzx       eax,byte ptr [ebp-1Fh]
+  000000D6: 50                 push        eax
+  000000D7: 0F B6 45 E0        movzx       eax,byte ptr [ebp-20h]
+  000000DB: 50                 push        eax
+  000000DC: 0F B6 45 DF        movzx       eax,byte ptr [ebp-21h]
+  000000E0: 50                 push        eax
+  000000E1: 0F B6 45 DE        movzx       eax,byte ptr [ebp-22h]
+  000000E5: 50                 push        eax
+  000000E6: 0F B6 45 DD        movzx       eax,byte ptr [ebp-23h]
+  000000EA: 50                 push        eax
+  000000EB: 0F B6 45 DC        movzx       eax,byte ptr [ebp-24h]
+  000000EF: 50                 push        eax
+  000000F0: 0F B6 45 DB        movzx       eax,byte ptr [ebp-25h]
+  000000F4: 50                 push        eax
+  000000F5: 0F B6 45 DA        movzx       eax,byte ptr [ebp-26h]
+  000000F9: 50                 push        eax
+  000000FA: 0F B6 45 D9        movzx       eax,byte ptr [ebp-27h]
+  000000FE: 50                 push        eax
+  000000FF: 0F B6 45 D8        movzx       eax,byte ptr [ebp-28h]
+  00000103: 50                 push        eax
+  00000104: 51                 push        ecx
+  00000105: 56                 push        esi
+  00000106: 53                 push        ebx
+  00000107: FF 75 0C           push        dword ptr [ebp+0Ch]
+  0000010A: 68 00 00 00 00     push        offset ??_C@_0FM@DGIMNODP@?$FLH5?$FN?5ret?$DN?$CF05X?5len?$DN?$CF3d?5strlen?$DN?$CF3@
+  0000010F: 8D 85 F8 FE FF FF  lea         eax,[ebp-108h]
+  00000115: 50                 push        eax
+  00000116: FF 15 00 00 00 00  call        dword ptr [__imp__wsprintfA]
+  0000011C: 8D 85 F8 FE FF FF  lea         eax,[ebp-108h]
+  00000122: 50                 push        eax
+  00000123: E8 00 00 00 00     call        ?diag_write@@YAXPBD@Z
+  00000128: 83 C4 44           add         esp,44h
+  0000012B: 3B DE              cmp         ebx,esi
+  0000012D: 7E 08              jle         00000137
+  0000012F: 81 FB F9 00 00 00  cmp         ebx,0F9h
+  00000135: 7E 02              jle         00000139
+  00000137: 33 DB              xor         ebx,ebx
+  00000139: 8B C3              mov         eax,ebx
+  0000013B: EB 12              jmp         0000014F
+$LN18:
+  0000013D: B8 01 00 00 00     mov         eax,1
+$LN20:
+  00000142: C3                 ret
+$LN19:
+  00000143: 8B 65 E8           mov         esp,dword ptr [ebp-18h]
+  00000146: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  0000014D: 33 C0              xor         eax,eax
+  0000014F: 8B 4D F0           mov         ecx,dword ptr [ebp-10h]
+  00000152: 64 89 0D 00 00 00  mov         dword ptr fs:[0],ecx
+            00
+  00000159: 59                 pop         ecx
+  0000015A: 5F                 pop         edi
+  0000015B: 5E                 pop         esi
+  0000015C: 5B                 pop         ebx
+  0000015D: 8B 4D E4           mov         ecx,dword ptr [ebp-1Ch]
+  00000160: 33 CD              xor         ecx,ebp
+  00000162: E8 00 00 00 00     call        @__security_check_cookie@4
+  00000167: 8B E5              mov         esp,ebp
+  00000169: 5D                 pop         ebp
+  0000016A: C3                 ret
+
+?cjk_draw_len_trampoline_impl@@YAXXZ (void __cdecl cjk_draw_len_trampoline_impl(void)):
+  00000000: 60                 pushad
+  00000001: 8B 4C 24 38        mov         ecx,dword ptr [esp+38h]
+  00000005: 2B 0D 00 00 00 00  sub         ecx,dword ptr [?g_gwBase@@3KA]
+  0000000B: 81 F9 00 D0 08 00  cmp         ecx,8D000h
+  00000011: 72 30              jb          00000043
+  00000013: 81 F9 00 F0 08 00  cmp         ecx,8F000h
+  00000019: 77 28              ja          00000043
+  0000001B: 51                 push        ecx
+  0000001C: 50                 push        eax
+  0000001D: E8 00 00 00 00     call        ?cjk_draw_len@@YAHPBXK@Z
+  00000022: 83 C4 08           add         esp,8
+  00000025: 85 C0              test        eax,eax
+  00000027: 74 1A              je          00000043
+  00000029: 89 44 24 18        mov         dword ptr [esp+18h],eax
+  0000002D: 61                 popad
+  0000002E: 8B 17              mov         edx,dword ptr [edi]
+  00000030: 51                 push        ecx
+  00000031: 50                 push        eax
+  00000032: 8B CF              mov         ecx,edi
+  00000034: FF 52 68           call        dword ptr [edx+68h]
+  00000037: A1 00 00 00 00     mov         eax,dword ptr [?g_gwBase@@3KA]
+  0000003C: 05 A4 9B 0F 00     add         eax,0F9BA4h
+  00000041: FF E0              jmp         eax
+  00000043: 61                 popad
+  00000044: 8B C8              mov         ecx,eax
+  00000046: 8D 71 01           lea         esi,[ecx+1]
+  00000049: 8B 15 00 00 00 00  mov         edx,dword ptr [?g_gwBase@@3KA]
+  0000004F: 81 C2 5E 9B 0F 00  add         edx,0F9B5Eh
+  00000055: FF E2              jmp         edx
+
+?cjk_text_len@@YAHPAX@Z (int __cdecl cjk_text_len(void *)):
+  00000000: 8B 54 24 04        mov         edx,dword ptr [esp+4]
+  00000004: 33 C0              xor         eax,eax
+  00000006: 85 D2              test        edx,edx
+  00000008: 74 24              je          0000002E
+  0000000A: 66 0F 1F 44 00 00  nop         word ptr [eax+eax]
+  00000010: 39 14 C5 00 00 00  cmp         dword ptr ?g_len@@3PAUCjkLen@@A[eax*8],edx
+            00
+  00000017: 75 0B              jne         00000024
+  00000019: 8B 0C C5 04 00 00  mov         ecx,dword ptr ?g_len@@3PAUCjkLen@@A[eax*8+4]
+            00
+  00000020: 85 C9              test        ecx,ecx
+  00000022: 7F 08              jg          0000002C
+  00000024: 40                 inc         eax
+  00000025: 83 F8 0C           cmp         eax,0Ch
+  00000028: 7C E6              jl          00000010
+  0000002A: 33 C9              xor         ecx,ecx
+  0000002C: 8B C1              mov         eax,ecx
+  0000002E: C3                 ret
+
+?cjk_tfstr_trampoline_impl@@YAXXZ (void __cdecl cjk_tfstr_trampoline_impl(void)):
+  00000000: 8B 04 24           mov         eax,dword ptr [esp]
+  00000003: 2B 05 00 00 00 00  sub         eax,dword ptr [?g_gwBase@@3KA]
+  00000009: 3D 00 D0 08 00     cmp         eax,8D000h
+  0000000E: 72 27              jb          00000037
+  00000010: 3D 00 F0 08 00     cmp         eax,8F000h
+  00000015: 77 20              ja          00000037
+  00000017: 8B 4C 24 08        mov         ecx,dword ptr [esp+8]
+  0000001B: 85 C9              test        ecx,ecx
+  0000001D: 74 18              je          00000037
+  0000001F: 8B 54 24 04        mov         edx,dword ptr [esp+4]
+  00000023: 50                 push        eax
+  00000024: 51                 push        ecx
+  00000025: 52                 push        edx
+  00000026: E8 00 00 00 00     call        ?tfstr_cjk_wide@@YAHPAXPBXK@Z
+  0000002B: 83 C4 0C           add         esp,0Ch
+  0000002E: 85 C0              test        eax,eax
+  00000030: 74 05              je          00000037
+  00000032: 8B 44 24 04        mov         eax,dword ptr [esp+4]
+  00000036: C3                 ret
+  00000037: 6A FF              push        0FFFFFFFFh
+  00000039: A1 00 00 00 00     mov         eax,dword ptr [?g_gwBase@@3KA]
+  0000003E: 05 C8 EA 12 00     add         eax,12EAC8h
+  00000043: 50                 push        eax
+  00000044: A1 00 00 00 00     mov         eax,dword ptr [?g_gwBase@@3KA]
+  00000049: 05 07 4F 05 00     add         eax,54F07h
+  0000004E: FF E0              jmp         eax
+
+?cjk_trampoline_impl@@YAXXZ (void __cdecl cjk_trampoline_impl(void)):
+  00000000: 60                 pushad
+  00000001: 8B 84 24 A4 48 00  mov         eax,dword ptr [esp+48A4h]
+            00
+  00000008: 2B 05 00 00 00 00  sub         eax,dword ptr [?g_gwBase@@3KA]
+  0000000E: 3D 00 D0 08 00     cmp         eax,8D000h
+  00000013: 72 1B              jb          00000030
+  00000015: 3D 00 F0 08 00     cmp         eax,8F000h
+  0000001A: 77 14              ja          00000030
+  0000001C: 8B 54 24 24        mov         edx,dword ptr [esp+24h]
+  00000020: 8B 44 24 2C        mov         eax,dword ptr [esp+2Ch]
+  00000024: 50                 push        eax
+  00000025: 52                 push        edx
+  00000026: E8 00 00 00 00     call        ?safe_process_subtitle_text@@YAXKK@Z
+  0000002B: 83 C4 08           add         esp,8
+  0000002E: EB 0B              jmp         0000003B
+  00000030: A1 00 00 00 00     mov         eax,dword ptr [?g_uiHits@@3JC]
+  00000035: 40                 inc         eax
+  00000036: A3 00 00 00 00     mov         dword ptr [?g_uiHits@@3JC],eax
+  0000003B: A1 00 00 00 00     mov         eax,dword ptr [?g_hits@@3JC]
+  00000040: 40                 inc         eax
+  00000041: A3 00 00 00 00     mov         dword ptr [?g_hits@@3JC],eax
+  00000046: 61                 popad
+  00000047: FF 35 00 00 00 00  push        dword ptr [?g_retVA@@3KA]
+  0000004D: FF 25 00 00 00 00  jmp         dword ptr [?g_thunkVA@@3KA]
+
+?diag_write@@YAXPBD@Z (void __cdecl diag_write(char const *)):
+  00000000: 51                 push        ecx
+  00000001: B8 01 00 00 00     mov         eax,1
+  00000006: F0 0F C1 05 00 00  lock xadd   dword ptr [?s_total@?1??diag_write@@YAXPBD@Z@4JC],eax
+            00 00
+  0000000E: 40                 inc         eax
+  0000000F: 3D A0 00 00 00     cmp         eax,0A0h
+  00000014: 7F 57              jg          0000006D
+  00000016: 57                 push        edi
+  00000017: 6A 00              push        0
+  00000019: 68 80 00 00 00     push        80h
+  0000001E: 6A 04              push        4
+  00000020: 6A 00              push        0
+  00000022: 6A 01              push        1
+  00000024: 68 00 00 00 40     push        40000000h
+  00000029: 68 00 00 00 00     push        offset ??_C@_0BC@HCMKNIPB@CJK_tfstr_log?4txt@
+  0000002E: FF 15 00 00 00 00  call        dword ptr [__imp__CreateFileA@28]
+  00000034: 8B F8              mov         edi,eax
+  00000036: 83 FF FF           cmp         edi,0FFFFFFFFh
+  00000039: 74 31              je          0000006C
+  0000003B: 6A 02              push        2
+  0000003D: 6A 00              push        0
+  0000003F: 6A 00              push        0
+  00000041: 57                 push        edi
+  00000042: FF 15 00 00 00 00  call        dword ptr [__imp__SetFilePointer@16]
+  00000048: 6A 00              push        0
+  0000004A: 8D 44 24 08        lea         eax,[esp+8]
+  0000004E: 50                 push        eax
+  0000004F: FF 74 24 14        push        dword ptr [esp+14h]
+  00000053: FF 15 00 00 00 00  call        dword ptr [__imp__lstrlenA@4]
+  00000059: 50                 push        eax
+  0000005A: FF 74 24 18        push        dword ptr [esp+18h]
+  0000005E: 57                 push        edi
+  0000005F: FF 15 00 00 00 00  call        dword ptr [__imp__WriteFile@20]
+  00000065: 57                 push        edi
+  00000066: FF 15 00 00 00 00  call        dword ptr [__imp__CloseHandle@4]
+  0000006C: 5F                 pop         edi
+  0000006D: 59                 pop         ecx
+  0000006E: C3                 ret
+
+?h4_diag@@YAXPAXPBEH@Z (void __cdecl h4_diag(void *,unsigned char const *,int)):
+  00000000: 81 EC 0C 01 00 00  sub         esp,10Ch
+  00000006: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  0000000B: 33 C4              xor         eax,esp
+  0000000D: 89 84 24 08 01 00  mov         dword ptr [esp+108h],eax
+            00
+  00000014: 8B 84 24 10 01 00  mov         eax,dword ptr [esp+110h]
+            00
+  0000001B: 8B 8C 24 18 01 00  mov         ecx,dword ptr [esp+118h]
+            00
+  00000022: 56                 push        esi
+  00000023: 8B B4 24 18 01 00  mov         esi,dword ptr [esp+118h]
+            00
+  0000002A: 89 44 24 08        mov         dword ptr [esp+8],eax
+  0000002E: B8 01 00 00 00     mov         eax,1
+  00000033: F0 0F C1 05 00 00  lock xadd   dword ptr [?s_c@?1??h4_diag@@YAXPAXPBEH@Z@4JC],eax
+            00 00
+  0000003B: 40                 inc         eax
+  0000003C: 83 F8 18           cmp         eax,18h
+  0000003F: 0F 8F 93 00 00 00  jg          000000D8
+  00000045: 53                 push        ebx
+  00000046: 55                 push        ebp
+  00000047: 57                 push        edi
+  00000048: 83 F9 01           cmp         ecx,1
+  0000004B: 7C 33              jl          00000080
+  0000004D: 0F B6 54 31 FF     movzx       edx,byte ptr [ecx+esi-1]
+  00000052: 8B C2              mov         eax,edx
+  00000054: 83 F9 02           cmp         ecx,2
+  00000057: 7C 29              jl          00000082
+  00000059: 0F B6 6C 31 FE     movzx       ebp,byte ptr [ecx+esi-2]
+  0000005E: 8B FD              mov         edi,ebp
+  00000060: 83 F9 03           cmp         ecx,3
+  00000063: 7C 1F              jl          00000084
+  00000065: 0F B6 5C 31 FD     movzx       ebx,byte ptr [ecx+esi-3]
+  0000006A: 83 F9 04           cmp         ecx,4
+  0000006D: 7C 17              jl          00000086
+  0000006F: 0F B6 44 31 FC     movzx       eax,byte ptr [ecx+esi-4]
+  00000074: 89 44 24 10        mov         dword ptr [esp+10h],eax
+  00000078: 8B C2              mov         eax,edx
+  0000007A: 8B 54 24 10        mov         edx,dword ptr [esp+10h]
+  0000007E: EB 08              jmp         00000088
+  00000080: 33 C0              xor         eax,eax
+  00000082: 33 FF              xor         edi,edi
+  00000084: 33 DB              xor         ebx,ebx
+  00000086: 33 D2              xor         edx,edx
+  00000088: 50                 push        eax
+  00000089: 0F B6 46 07        movzx       eax,byte ptr [esi+7]
+  0000008D: 57                 push        edi
+  0000008E: 53                 push        ebx
+  0000008F: 52                 push        edx
+  00000090: 50                 push        eax
+  00000091: 0F B6 46 06        movzx       eax,byte ptr [esi+6]
+  00000095: 50                 push        eax
+  00000096: 0F B6 46 05        movzx       eax,byte ptr [esi+5]
+  0000009A: 50                 push        eax
+  0000009B: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  0000009F: 50                 push        eax
+  000000A0: 0F B6 46 03        movzx       eax,byte ptr [esi+3]
+  000000A4: 50                 push        eax
+  000000A5: 0F B6 46 02        movzx       eax,byte ptr [esi+2]
+  000000A9: 50                 push        eax
+  000000AA: 0F B6 46 01        movzx       eax,byte ptr [esi+1]
+  000000AE: 50                 push        eax
+  000000AF: 0F B6 06           movzx       eax,byte ptr [esi]
+  000000B2: 50                 push        eax
+  000000B3: 51                 push        ecx
+  000000B4: FF 74 24 48        push        dword ptr [esp+48h]
+  000000B8: 8D 44 24 50        lea         eax,[esp+50h]
+  000000BC: 68 00 00 00 00     push        offset ??_C@_0FP@JBIGLCHA@?$FLH4?$FN?5dst?$DN?$CF08X?5total?$DN?$CF3d?5?$HM?5?$CF02X?5@
+  000000C1: 50                 push        eax
+  000000C2: FF 15 00 00 00 00  call        dword ptr [__imp__wsprintfA]
+  000000C8: 8D 44 24 58        lea         eax,[esp+58h]
+  000000CC: 50                 push        eax
+  000000CD: E8 00 00 00 00     call        ?diag_write@@YAXPBD@Z
+  000000D2: 83 C4 44           add         esp,44h
+  000000D5: 5F                 pop         edi
+  000000D6: 5D                 pop         ebp
+  000000D7: 5B                 pop         ebx
+  000000D8: 8B 8C 24 0C 01 00  mov         ecx,dword ptr [esp+10Ch]
+            00
+  000000DF: 5E                 pop         esi
+  000000E0: 33 CC              xor         ecx,esp
+  000000E2: E8 00 00 00 00     call        @__security_check_cookie@4
+  000000E7: 81 C4 0C 01 00 00  add         esp,10Ch
+  000000ED: C3                 ret
+
+?h5_diag@@YAXKHHPBE@Z (void __cdecl h5_diag(unsigned long,int,int,unsigned char const *)):
+  00000000: 81 EC E4 00 00 00  sub         esp,0E4h
+  00000006: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  0000000B: 33 C4              xor         eax,esp
+  0000000D: 89 84 24 E0 00 00  mov         dword ptr [esp+0E0h],eax
+            00
+  00000014: 8B 94 24 F4 00 00  mov         edx,dword ptr [esp+0F4h]
+            00
+  0000001B: B8 01 00 00 00     mov         eax,1
+  00000020: 56                 push        esi
+  00000021: 8B B4 24 F0 00 00  mov         esi,dword ptr [esp+0F0h]
+            00
+  00000028: 57                 push        edi
+  00000029: 8B BC 24 F8 00 00  mov         edi,dword ptr [esp+0F8h]
+            00
+  00000030: F0 0F C1 05 00 00  lock xadd   dword ptr [?s_c@?1??h5_diag@@YAXKHHPBE@Z@4JC],eax
+            00 00
+  00000038: 40                 inc         eax
+  00000039: 83 F8 18           cmp         eax,18h
+  0000003C: 7F 72              jg          000000B0
+  0000003E: 85 F6              test        esi,esi
+  00000040: 7E 11              jle         00000053
+  00000042: 3B F7              cmp         esi,edi
+  00000044: B9 00 00 00 00     mov         ecx,offset ??_C@_07BADDOMIJ@RESCUED@
+  00000049: B8 00 00 00 00     mov         eax,offset ??_C@_04FMLAMFAK@same@
+  0000004E: 0F 4E C8           cmovle      ecx,eax
+  00000051: EB 05              jmp         00000058
+  00000053: B9 00 00 00 00     mov         ecx,offset ??_C@_04EMPEPPKL@miss@
+  00000058: 0F B6 42 09        movzx       eax,byte ptr [edx+9]
+  0000005C: 50                 push        eax
+  0000005D: 0F B6 42 08        movzx       eax,byte ptr [edx+8]
+  00000061: 50                 push        eax
+  00000062: 0F B6 42 07        movzx       eax,byte ptr [edx+7]
+  00000066: 50                 push        eax
+  00000067: 0F B6 42 06        movzx       eax,byte ptr [edx+6]
+  0000006B: 50                 push        eax
+  0000006C: 0F B6 42 05        movzx       eax,byte ptr [edx+5]
+  00000070: 50                 push        eax
+  00000071: 0F B6 42 04        movzx       eax,byte ptr [edx+4]
+  00000075: 50                 push        eax
+  00000076: 0F B6 42 03        movzx       eax,byte ptr [edx+3]
+  0000007A: 50                 push        eax
+  0000007B: 0F B6 42 02        movzx       eax,byte ptr [edx+2]
+  0000007F: 50                 push        eax
+  00000080: 0F B6 42 01        movzx       eax,byte ptr [edx+1]
+  00000084: 50                 push        eax
+  00000085: 0F B6 02           movzx       eax,byte ptr [edx]
+  00000088: 50                 push        eax
+  00000089: 51                 push        ecx
+  0000008A: 57                 push        edi
+  0000008B: 56                 push        esi
+  0000008C: FF B4 24 24 01 00  push        dword ptr [esp+124h]
+            00
+  00000093: 8D 44 24 40        lea         eax,[esp+40h]
+  00000097: 68 00 00 00 00     push        offset ??_C@_0FM@DGIMNODP@?$FLH5?$FN?5ret?$DN?$CF05X?5len?$DN?$CF3d?5strlen?$DN?$CF3@
+  0000009C: 50                 push        eax
+  0000009D: FF 15 00 00 00 00  call        dword ptr [__imp__wsprintfA]
+  000000A3: 8D 44 24 48        lea         eax,[esp+48h]
+  000000A7: 50                 push        eax
+  000000A8: E8 00 00 00 00     call        ?diag_write@@YAXPBD@Z
+  000000AD: 83 C4 44           add         esp,44h
+  000000B0: 8B 8C 24 E8 00 00  mov         ecx,dword ptr [esp+0E8h]
+            00
+  000000B7: 5F                 pop         edi
+  000000B8: 5E                 pop         esi
+  000000B9: 33 CC              xor         ecx,esp
+  000000BB: E8 00 00 00 00     call        @__security_check_cookie@4
+  000000C0: 81 C4 E4 00 00 00  add         esp,0E4h
+  000000C6: C3                 ret
+
+?install_hook@@YAHXZ (int __cdecl install_hook(void)):
+  00000000: 51                 push        ecx
+  00000001: 83 3D 00 00 00 00  cmp         dword ptr [?g_hooked@@3HA],0
+            00
+  00000008: 74 07              je          00000011
+  0000000A: B8 01 00 00 00     mov         eax,1
+  0000000F: 59                 pop         ecx
+  00000010: C3                 ret
+  00000011: 56                 push        esi
+  00000012: 57                 push        edi
+  00000013: 68 00 00 00 00     push        offset ??_C@_0O@OFAPEGOE@GameWorld?4dll@
+  00000018: FF 15 00 00 00 00  call        dword ptr [__imp__GetModuleHandleA@4]
+  0000001E: 8B D0              mov         edx,eax
+  00000020: 89 15 00 00 00 00  mov         dword ptr [?g_hGameWorld@@3PAUHINSTANCE__@@A],edx
+  00000026: 85 D2              test        edx,edx
+  00000028: 74 3F              je          00000069
+  0000002A: 8D 82 C4 05 10 00  lea         eax,[edx+1005C4h]
+  00000030: 89 15 00 00 00 00  mov         dword ptr [?g_gwBase@@3KA],edx
+  00000036: 8D 8A B7 0F 02 00  lea         ecx,[edx+20FB7h]
+  0000003C: A3 00 00 00 00     mov         dword ptr [?g_thunkVA@@3KA],eax
+  00000041: 8D B2 B2 0F 02 00  lea         esi,[edx+20FB2h]
+  00000047: 89 0D 00 00 00 00  mov         dword ptr [?g_retVA@@3KA],ecx
+  0000004D: 8A 06              mov         al,byte ptr [esi]
+  0000004F: 3C E8              cmp         al,0E8h
+  00000051: 74 1C              je          0000006F
+  00000053: 0F B6 C0           movzx       eax,al
+  00000056: 50                 push        eax
+  00000057: 68 B2 0F 02 00     push        20FB2h
+  0000005C: 68 00 00 00 00     push        offset ??_C@_0CI@KMPHKHCI@?$FLCJK?$FN?50x?$CFX?5?$LH?G?5call?5?$CI0x?$CF02X?$CJ?$KD?$KM?L?x@
+  00000061: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000066: 83 C4 0C           add         esp,0Ch
+  00000069: 5F                 pop         edi
+  0000006A: 33 C0              xor         eax,eax
+  0000006C: 5E                 pop         esi
+  0000006D: 59                 pop         ecx
+  0000006E: C3                 ret
+  0000006F: 8B 06              mov         eax,dword ptr [esi]
+  00000071: 8B 3D 00 00 00 00  mov         edi,dword ptr [__imp__VirtualProtect@16]
+  00000077: A3 00 00 00 00     mov         dword ptr [?g_origBytes@@3PAEA],eax
+  0000007C: 8A 46 04           mov         al,byte ptr [esi+4]
+  0000007F: A2 04 00 00 00     mov         byte ptr [?g_origBytes@@3PAEA+4],al
+  00000084: 8D 44 24 08        lea         eax,[esp+8]
+  00000088: 50                 push        eax
+  00000089: 6A 40              push        40h
+  0000008B: 6A 05              push        5
+  0000008D: 56                 push        esi
+  0000008E: FF D7              call        edi
+  00000090: 85 C0              test        eax,eax
+  00000092: 74 D5              je          00000069
+  00000094: 53                 push        ebx
+  00000095: B8 00 00 00 00     mov         eax,offset ?cjk_trampoline_impl@@YAXXZ
+  0000009A: C6 06 E9           mov         byte ptr [esi],0E9h
+  0000009D: 2B C6              sub         eax,esi
+  0000009F: 83 E8 05           sub         eax,5
+  000000A2: 55                 push        ebp
+  000000A3: 89 46 01           mov         dword ptr [esi+1],eax
+  000000A6: 8D 44 24 10        lea         eax,[esp+10h]
+  000000AA: 50                 push        eax
+  000000AB: FF 74 24 14        push        dword ptr [esp+14h]
+  000000AF: 6A 05              push        5
+  000000B1: 56                 push        esi
+  000000B2: FF D7              call        edi
+  000000B4: 8B 1D 00 00 00 00  mov         ebx,dword ptr [__imp__GetCurrentProcess@0]
+  000000BA: 6A 05              push        5
+  000000BC: 56                 push        esi
+  000000BD: FF D3              call        ebx
+  000000BF: 8B 2D 00 00 00 00  mov         ebp,dword ptr [__imp__FlushInstructionCache@12]
+  000000C5: 50                 push        eax
+  000000C6: FF D5              call        ebp
+  000000C8: 8B 35 00 00 00 00  mov         esi,dword ptr [?g_gwBase@@3KA]
+  000000CE: 81 C6 00 4F 05 00  add         esi,54F00h
+  000000D4: C7 05 00 00 00 00  mov         dword ptr [?g_hooked@@3HA],1
+            01 00 00 00
+  000000DE: 8B 06              mov         eax,dword ptr [esi]
+  000000E0: A3 00 00 00 00     mov         dword ptr [?g_origTfstr@@3PAEA],eax
+  000000E5: 66 8B 46 04        mov         ax,word ptr [esi+4]
+  000000E9: 66 A3 04 00 00 00  mov         word ptr [?g_origTfstr@@3PAEA+4],ax
+  000000EF: 8A 46 06           mov         al,byte ptr [esi+6]
+  000000F2: A2 06 00 00 00     mov         byte ptr [?g_origTfstr@@3PAEA+6],al
+  000000F7: 8D 44 24 10        lea         eax,[esp+10h]
+  000000FB: 50                 push        eax
+  000000FC: 6A 40              push        40h
+  000000FE: 6A 07              push        7
+  00000100: 56                 push        esi
+  00000101: FF D7              call        edi
+  00000103: 85 C0              test        eax,eax
+  00000105: 74 4D              je          00000154
+  00000107: B8 00 00 00 00     mov         eax,offset ?cjk_tfstr_trampoline_impl@@YAXXZ
+  0000010C: C6 06 E9           mov         byte ptr [esi],0E9h
+  0000010F: 2B C6              sub         eax,esi
+  00000111: 83 E8 05           sub         eax,5
+  00000114: 89 46 01           mov         dword ptr [esi+1],eax
+  00000117: 8D 44 24 10        lea         eax,[esp+10h]
+  0000011B: 50                 push        eax
+  0000011C: 66 C7 46 05 90 90  mov         word ptr [esi+5],9090h
+  00000122: FF 74 24 14        push        dword ptr [esp+14h]
+  00000126: 6A 07              push        7
+  00000128: 56                 push        esi
+  00000129: FF D7              call        edi
+  0000012B: 6A 07              push        7
+  0000012D: 56                 push        esi
+  0000012E: FF D3              call        ebx
+  00000130: 50                 push        eax
+  00000131: FF D5              call        ebp
+  00000133: 68 00 00 00 00     push        offset ?cjk_tfstr_trampoline_impl@@YAXXZ
+  00000138: 68 00 4F 05 00     push        54F00h
+  0000013D: 68 00 00 00 00     push        offset ??_C@_0CJ@JBFIALBB@?$FLCJK?$FN?5v14?5TFStr?5?$LJ?$LJ?T?l?5hook?3?50x?$CFX@
+  00000142: C7 05 00 00 00 00  mov         dword ptr [?g_hookedTfstr@@3HA],1
+            01 00 00 00
+  0000014C: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000151: 83 C4 0C           add         esp,0Ch
+  00000154: 8B 35 00 00 00 00  mov         esi,dword ptr [?g_gwBase@@3KA]
+  0000015A: 81 C6 1A ED 08 00  add         esi,8ED1Ah
+  00000160: 8B 06              mov         eax,dword ptr [esi]
+  00000162: A3 00 00 00 00     mov         dword ptr [?g_origConcatLen@@3PAEA],eax
+  00000167: 8A 46 04           mov         al,byte ptr [esi+4]
+  0000016A: A2 04 00 00 00     mov         byte ptr [?g_origConcatLen@@3PAEA+4],al
+  0000016F: 8D 44 24 10        lea         eax,[esp+10h]
+  00000173: 50                 push        eax
+  00000174: 6A 40              push        40h
+  00000176: 6A 05              push        5
+  00000178: 56                 push        esi
+  00000179: FF D7              call        edi
+  0000017B: 85 C0              test        eax,eax
+  0000017D: 74 47              je          000001C6
+  0000017F: B8 00 00 00 00     mov         eax,offset ?cjk_concat_len_trampoline_impl@@YAXXZ
+  00000184: C6 06 E9           mov         byte ptr [esi],0E9h
+  00000187: 2B C6              sub         eax,esi
+  00000189: 83 E8 05           sub         eax,5
+  0000018C: 89 46 01           mov         dword ptr [esi+1],eax
+  0000018F: 8D 44 24 10        lea         eax,[esp+10h]
+  00000193: 50                 push        eax
+  00000194: FF 74 24 14        push        dword ptr [esp+14h]
+  00000198: 6A 05              push        5
+  0000019A: 56                 push        esi
+  0000019B: FF D7              call        edi
+  0000019D: 6A 05              push        5
+  0000019F: 56                 push        esi
+  000001A0: FF D3              call        ebx
+  000001A2: 50                 push        eax
+  000001A3: FF D5              call        ebp
+  000001A5: 68 00 00 00 00     push        offset ?cjk_concat_len_trampoline_impl@@YAXXZ
+  000001AA: 68 1A ED 08 00     push        8ED1Ah
+  000001AF: 68 00 00 00 00     push        offset ??_C@_0CM@NEMLADJK@?$FLCJK?$FN?5v15b?5?F?$LE?$LN?S?$LD?$KE?$LG?H?P?$NO?U?$PN?5hook?3?50@
+  000001B4: C7 05 00 00 00 00  mov         dword ptr [?g_hookedConcatLen@@3HA],1
+            01 00 00 00
+  000001BE: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  000001C3: 83 C4 0C           add         esp,0Ch
+  000001C6: 8B 35 00 00 00 00  mov         esi,dword ptr [?g_gwBase@@3KA]
+  000001CC: B9 00 00 00 00     mov         ecx,offset ?expect4@?BC@??install_hook@@YAHXZ@4QBEB
+  000001D1: 81 C6 9A ED 08 00  add         esi,8ED9Ah
+  000001D7: 8B 06              mov         eax,dword ptr [esi]
+  000001D9: 3B 01              cmp         eax,dword ptr [ecx]
+  000001DB: 75 71              jne         0000024E
+  000001DD: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  000001E1: 3A 41 04           cmp         al,byte ptr [ecx+4]
+  000001E4: 75 68              jne         0000024E
+  000001E6: 8B 06              mov         eax,dword ptr [esi]
+  000001E8: A3 00 00 00 00     mov         dword ptr [?g_origConcatFin@@3PAEA],eax
+  000001ED: 8A 46 04           mov         al,byte ptr [esi+4]
+  000001F0: A2 04 00 00 00     mov         byte ptr [?g_origConcatFin@@3PAEA+4],al
+  000001F5: 8D 44 24 10        lea         eax,[esp+10h]
+  000001F9: 50                 push        eax
+  000001FA: 6A 40              push        40h
+  000001FC: 6A 05              push        5
+  000001FE: 56                 push        esi
+  000001FF: FF D7              call        edi
+  00000201: 85 C0              test        eax,eax
+  00000203: 74 73              je          00000278
+  00000205: B8 00 00 00 00     mov         eax,offset ?cjk_concat_fin_trampoline_impl@@YAXXZ
+  0000020A: C6 06 E9           mov         byte ptr [esi],0E9h
+  0000020D: 2B C6              sub         eax,esi
+  0000020F: 83 E8 05           sub         eax,5
+  00000212: 89 46 01           mov         dword ptr [esi+1],eax
+  00000215: 8D 44 24 10        lea         eax,[esp+10h]
+  00000219: 50                 push        eax
+  0000021A: FF 74 24 14        push        dword ptr [esp+14h]
+  0000021E: 6A 05              push        5
+  00000220: 56                 push        esi
+  00000221: FF D7              call        edi
+  00000223: 6A 05              push        5
+  00000225: 56                 push        esi
+  00000226: FF D3              call        ebx
+  00000228: 50                 push        eax
+  00000229: FF D5              call        ebp
+  0000022B: 68 00 00 00 00     push        offset ?cjk_concat_fin_trampoline_impl@@YAXXZ
+  00000230: 68 9A ED 08 00     push        8ED9Ah
+  00000235: 68 00 00 00 00     push        offset ??_C@_0CI@FBGCCNAM@?$FLCJK?$FN?5v16f?5?F?$LE?$LN?S?J?U?N?$LC?5hook?3?50x?$CFX?5@
+  0000023A: C7 05 00 00 00 00  mov         dword ptr [?g_hookedConcatFin@@3HA],1
+            01 00 00 00
+  00000244: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000249: 83 C4 0C           add         esp,0Ch
+  0000024C: EB 2A              jmp         00000278
+  0000024E: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  00000252: 50                 push        eax
+  00000253: 0F B6 46 03        movzx       eax,byte ptr [esi+3]
+  00000257: 50                 push        eax
+  00000258: 0F B6 46 02        movzx       eax,byte ptr [esi+2]
+  0000025C: 50                 push        eax
+  0000025D: 0F B6 46 01        movzx       eax,byte ptr [esi+1]
+  00000261: 50                 push        eax
+  00000262: 0F B6 06           movzx       eax,byte ptr [esi]
+  00000265: 50                 push        eax
+  00000266: 68 9A ED 08 00     push        8ED9Ah
+  0000026B: 68 00 00 00 00     push        offset ??_C@_0EA@MEDJPBJA@?$FLCJK?$FN?5?$CB?$CB?50x?$CFX?5?W?V?$LN?Z?$LC?$LL?$LH?$PL?$KD?$KI?$CF02X?5?$CF0@
+  00000270: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000275: 83 C4 1C           add         esp,1Ch
+  00000278: 8B 35 00 00 00 00  mov         esi,dword ptr [?g_gwBase@@3KA]
+  0000027E: B9 00 00 00 00     mov         ecx,offset ?expect5@?BL@??install_hook@@YAHXZ@4QBEB
+  00000283: 81 C6 59 9B 0F 00  add         esi,0F9B59h
+  00000289: 8B 06              mov         eax,dword ptr [esi]
+  0000028B: 3B 01              cmp         eax,dword ptr [ecx]
+  0000028D: 75 71              jne         00000300
+  0000028F: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  00000293: 3A 41 04           cmp         al,byte ptr [ecx+4]
+  00000296: 75 68              jne         00000300
+  00000298: 8B 06              mov         eax,dword ptr [esi]
+  0000029A: A3 00 00 00 00     mov         dword ptr [?g_origDrawLen@@3PAEA],eax
+  0000029F: 8A 46 04           mov         al,byte ptr [esi+4]
+  000002A2: A2 04 00 00 00     mov         byte ptr [?g_origDrawLen@@3PAEA+4],al
+  000002A7: 8D 44 24 10        lea         eax,[esp+10h]
+  000002AB: 50                 push        eax
+  000002AC: 6A 40              push        40h
+  000002AE: 6A 05              push        5
+  000002B0: 56                 push        esi
+  000002B1: FF D7              call        edi
+  000002B3: 85 C0              test        eax,eax
+  000002B5: 74 73              je          0000032A
+  000002B7: B8 00 00 00 00     mov         eax,offset ?cjk_draw_len_trampoline_impl@@YAXXZ
+  000002BC: C6 06 E9           mov         byte ptr [esi],0E9h
+  000002BF: 2B C6              sub         eax,esi
+  000002C1: 83 E8 05           sub         eax,5
+  000002C4: 89 46 01           mov         dword ptr [esi+1],eax
+  000002C7: 8D 44 24 10        lea         eax,[esp+10h]
+  000002CB: 50                 push        eax
+  000002CC: FF 74 24 14        push        dword ptr [esp+14h]
+  000002D0: 6A 05              push        5
+  000002D2: 56                 push        esi
+  000002D3: FF D7              call        edi
+  000002D5: 6A 05              push        5
+  000002D7: 56                 push        esi
+  000002D8: FF D3              call        ebx
+  000002DA: 50                 push        eax
+  000002DB: FF D5              call        ebp
+  000002DD: 68 00 00 00 00     push        offset ?cjk_draw_len_trampoline_impl@@YAXXZ
+  000002E2: 68 59 9B 0F 00     push        0F9B59h
+  000002E7: 68 00 00 00 00     push        offset ??_C@_0CI@BGIDNGIP@?$FLCJK?$FN?5v16f?5?$LL?f?V?F?$LD?$KE?$LG?H?5hook?3?50x?$CFX?5@
+  000002EC: C7 05 00 00 00 00  mov         dword ptr [?g_hookedDrawLen@@3HA],1
+            01 00 00 00
+  000002F6: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  000002FB: 83 C4 0C           add         esp,0Ch
+  000002FE: EB 2A              jmp         0000032A
+  00000300: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  00000304: 50                 push        eax
+  00000305: 0F B6 46 03        movzx       eax,byte ptr [esi+3]
+  00000309: 50                 push        eax
+  0000030A: 0F B6 46 02        movzx       eax,byte ptr [esi+2]
+  0000030E: 50                 push        eax
+  0000030F: 0F B6 46 01        movzx       eax,byte ptr [esi+1]
+  00000313: 50                 push        eax
+  00000314: 0F B6 06           movzx       eax,byte ptr [esi]
+  00000317: 50                 push        eax
+  00000318: 68 59 9B 0F 00     push        0F9B59h
+  0000031D: 68 00 00 00 00     push        offset ??_C@_0EA@MFPLJLKH@?$FLCJK?$FN?5?$CB?$CB?50x?$CFX?5?W?V?$LN?Z?$LC?$LL?$LH?$PL?$KD?$KI?$CF02X?5?$CF0@
+  00000322: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000327: 83 C4 1C           add         esp,1Ch
+  0000032A: FF 35 00 00 00 00  push        dword ptr [?g_hookedDrawLen@@3HA]
+  00000330: FF 35 00 00 00 00  push        dword ptr [?g_hookedConcatFin@@3HA]
+  00000336: FF 35 00 00 00 00  push        dword ptr [?g_hookedConcatLen@@3HA]
+  0000033C: FF 35 00 00 00 00  push        dword ptr [?g_hookedTfstr@@3HA]
+  00000342: FF 35 00 00 00 00  push        dword ptr [?g_gwBase@@3KA]
+  00000348: 68 00 00 00 00     push        offset ?cjk_trampoline_impl@@YAXXZ
+  0000034D: 68 B2 0F 02 00     push        20FB2h
+  00000352: 68 00 00 00 00     push        offset ??_C@_0GE@HNLJENPI@?$FLCJK?$FN?5EnclaveCJK?5v16f?5Hook?5?$LA?$LC?W?$LA@
+  00000357: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  0000035C: 83 C4 20           add         esp,20h
+  0000035F: B8 01 00 00 00     mov         eax,1
+  00000364: 5D                 pop         ebp
+  00000365: 5B                 pop         ebx
+  00000366: 5F                 pop         edi
+  00000367: 5E                 pop         esi
+  00000368: 59                 pop         ecx
+  00000369: C3                 ret
+
+?is_body_char@@YAHG@Z (int __cdecl is_body_char(unsigned short)):
+  00000000: 8B 4C 24 04        mov         ecx,dword ptr [esp+4]
+  00000004: 66 85 C9           test        cx,cx
+  00000007: 0F 84 80 00 00 00  je          0000008D
+  0000000D: B8 A7 00 00 00     mov         eax,0A7h
+  00000012: 66 3B C8           cmp         cx,ax
+  00000015: 74 70              je          00000087
+  00000017: F7 C1 00 FF 00 00  test        ecx,0FF00h
+  0000001D: 75 0E              jne         0000002D
+  0000001F: 8D 41 E0           lea         eax,[ecx-20h]
+  00000022: 66 B9 5E 00        mov         cx,5Eh
+  00000026: 66 3B C8           cmp         cx,ax
+  00000029: 1B C0              sbb         eax,eax
+  0000002B: 40                 inc         eax
+  0000002C: C3                 ret
+  0000002D: B8 00 FF 00 00     mov         eax,0FF00h
+  00000032: 66 3B C8           cmp         cx,ax
+  00000035: 74 56              je          0000008D
+  00000037: B8 FE FF 00 00     mov         eax,0FFFEh
+  0000003C: 66 3B C8           cmp         cx,ax
+  0000003F: 74 4C              je          0000008D
+  00000041: B8 FF FF 00 00     mov         eax,0FFFFh
+  00000046: 66 3B C8           cmp         cx,ax
+  00000049: 74 42              je          0000008D
+  0000004B: 8D 81 00 D0 FF FF  lea         eax,[ecx+FFFFD000h]
+  00000051: BA FF 00 00 00     mov         edx,0FFh
+  00000056: 66 3B C2           cmp         ax,dx
+  00000059: 76 2C              jbe         00000087
+  0000005B: 8D 81 00 B2 FF FF  lea         eax,[ecx+FFFFB200h]
+  00000061: BA FF 51 00 00     mov         edx,51FFh
+  00000066: 66 3B C2           cmp         ax,dx
+  00000069: 76 1C              jbe         00000087
+  0000006B: 8D 81 FF 00 00 00  lea         eax,[ecx+000000FFh]
+  00000071: BA EE 00 00 00     mov         edx,0EEh
+  00000076: 66 3B C2           cmp         ax,dx
+  00000079: 76 0C              jbe         00000087
+  0000007B: 8D 81 F0 DF FF FF  lea         eax,[ecx+FFFFDFF0h]
+  00000081: 66 83 F8 17        cmp         ax,17h
+  00000085: 77 06              ja          0000008D
+  00000087: B8 01 00 00 00     mov         eax,1
+  0000008C: C3                 ret
+  0000008D: 33 C0              xor         eax,eax
+  0000008F: C3                 ret
+
+?is_junk_char@@YAHG@Z (int __cdecl is_junk_char(unsigned short)):
+  00000000: 8B 4C 24 04        mov         ecx,dword ptr [esp+4]
+  00000004: 0F B7 D1           movzx       edx,cx
+  00000007: 56                 push        esi
+  00000008: 66 83 F9 20        cmp         cx,20h
+  0000000C: 72 69              jb          00000077
+  0000000E: 8D 81 00 CC FF FF  lea         eax,[ecx+FFFFCC00h]
+  00000014: BE BF 19 00 00     mov         esi,19BFh
+  00000019: 66 3B C6           cmp         ax,si
+  0000001C: 76 59              jbe         00000077
+  0000001E: 8D 81 00 60 00 00  lea         eax,[ecx+00006000h]
+  00000024: BE FF 0B 00 00     mov         esi,0BFFh
+  00000029: 66 3B C6           cmp         ax,si
+  0000002C: 76 49              jbe         00000077
+  0000002E: 8D 81 00 54 00 00  lea         eax,[ecx+00005400h]
+  00000034: BE FF 2B 00 00     mov         esi,2BFFh
+  00000039: 66 3B C6           cmp         ax,si
+  0000003C: 76 39              jbe         00000077
+  0000003E: 8D 81 00 28 00 00  lea         eax,[ecx+00002800h]
+  00000044: BE FF 07 00 00     mov         esi,7FFh
+  00000049: 66 3B C6           cmp         ax,si
+  0000004C: 76 29              jbe         00000077
+  0000004E: 8D 81 00 20 00 00  lea         eax,[ecx+00002000h]
+  00000054: BE FF 18 00 00     mov         esi,18FFh
+  00000059: 66 3B C6           cmp         ax,si
+  0000005C: 76 19              jbe         00000077
+  0000005E: B8 FE FF 00 00     mov         eax,0FFFEh
+  00000063: 66 3B C8           cmp         cx,ax
+  00000066: 74 0F              je          00000077
+  00000068: B9 FF FF 00 00     mov         ecx,0FFFFh
+  0000006D: 33 C0              xor         eax,eax
+  0000006F: 66 3B D1           cmp         dx,cx
+  00000072: 5E                 pop         esi
+  00000073: 0F 94 C0           sete        al
+  00000076: C3                 ret
+  00000077: B8 01 00 00 00     mov         eax,1
+  0000007C: 5E                 pop         esi
+  0000007D: C3                 ret
+
+?is_stack_addr@@YAHK@Z (int __cdecl is_stack_addr(unsigned long)):
+  00000000: 64 A1 18 00 00 00  mov         eax,dword ptr fs:[00000018h]
+  00000006: 8B 4C 24 04        mov         ecx,dword ptr [esp+4]
+  0000000A: 3B 48 08           cmp         ecx,dword ptr [eax+8]
+  0000000D: 72 0B              jb          0000001A
+  0000000F: 3B 48 04           cmp         ecx,dword ptr [eax+4]
+  00000012: 73 06              jae         0000001A
+  00000014: B8 01 00 00 00     mov         eax,1
+  00000019: C3                 ret
+  0000001A: 33 C0              xor         eax,eax
+  0000001C: C3                 ret
+
+?junk_ahead@@YAHPBGH@Z (int __cdecl junk_ahead(unsigned short const *,int)):
+  00000000: 8B 54 24 08        mov         edx,dword ptr [esp+8]
+  00000004: 83 EC 10           sub         esp,10h
+  00000007: 53                 push        ebx
+  00000008: 55                 push        ebp
+  00000009: 56                 push        esi
+  0000000A: 8D 72 06           lea         esi,[edx+6]
+  0000000D: 57                 push        edi
+  0000000E: 8B 7C 24 24        mov         edi,dword ptr [esp+24h]
+  00000012: 3B D6              cmp         edx,esi
+  00000014: 0F 8D 99 00 00 00  jge         000000B3
+  0000001A: BB FE FF 00 00     mov         ebx,0FFFEh
+  0000001F: C7 44 24 28 BF 19  mov         dword ptr [esp+28h],19BFh
+            00 00
+  00000027: C7 44 24 10 FF 0B  mov         dword ptr [esp+10h],0BFFh
+            00 00
+  0000002F: C7 44 24 14 FF 2B  mov         dword ptr [esp+14h],2BFFh
+            00 00
+  00000037: C7 44 24 18 FF 07  mov         dword ptr [esp+18h],7FFh
+            00 00
+  0000003F: C7 44 24 1C FF 18  mov         dword ptr [esp+1Ch],18FFh
+            00 00
+  00000047: 8D 6B 01           lea         ebp,[ebx+1]
+  0000004A: 66 0F 1F 44 00 00  nop         word ptr [eax+eax]
+  00000050: 83 FA 78           cmp         edx,78h
+  00000053: 7D 5E              jge         000000B3
+  00000055: 0F B7 04 57        movzx       eax,word ptr [edi+edx*2]
+  00000059: 66 85 C0           test        ax,ax
+  0000005C: 74 55              je          000000B3
+  0000005E: 83 F8 20           cmp         eax,20h
+  00000061: 72 5A              jb          000000BD
+  00000063: 8D 88 00 CC FF FF  lea         ecx,[eax+FFFFCC00h]
+  00000069: 66 3B 4C 24 28     cmp         cx,word ptr [esp+28h]
+  0000006E: 76 4D              jbe         000000BD
+  00000070: 8D 88 00 60 00 00  lea         ecx,[eax+00006000h]
+  00000076: 66 3B 4C 24 10     cmp         cx,word ptr [esp+10h]
+  0000007B: 76 40              jbe         000000BD
+  0000007D: 8D 88 00 54 00 00  lea         ecx,[eax+00005400h]
+  00000083: 66 3B 4C 24 14     cmp         cx,word ptr [esp+14h]
+  00000088: 76 33              jbe         000000BD
+  0000008A: 8D 88 00 28 00 00  lea         ecx,[eax+00002800h]
+  00000090: 66 3B 4C 24 18     cmp         cx,word ptr [esp+18h]
+  00000095: 76 26              jbe         000000BD
+  00000097: 8D 88 00 20 00 00  lea         ecx,[eax+00002000h]
+  0000009D: 66 3B 4C 24 1C     cmp         cx,word ptr [esp+1Ch]
+  000000A2: 76 19              jbe         000000BD
+  000000A4: 66 3B C3           cmp         ax,bx
+  000000A7: 74 14              je          000000BD
+  000000A9: 66 3B C5           cmp         ax,bp
+  000000AC: 74 0F              je          000000BD
+  000000AE: 42                 inc         edx
+  000000AF: 3B D6              cmp         edx,esi
+  000000B1: 7C 9D              jl          00000050
+  000000B3: 5F                 pop         edi
+  000000B4: 5E                 pop         esi
+  000000B5: 5D                 pop         ebp
+  000000B6: 33 C0              xor         eax,eax
+  000000B8: 5B                 pop         ebx
+  000000B9: 83 C4 10           add         esp,10h
+  000000BC: C3                 ret
+  000000BD: 5F                 pop         edi
+  000000BE: 5E                 pop         esi
+  000000BF: 5D                 pop         ebp
+  000000C0: B8 01 00 00 00     mov         eax,1
+  000000C5: 5B                 pop         ebx
+  000000C6: 83 C4 10           add         esp,10h
+  000000C9: C3                 ret
+
+?len_find@@YAHPAX@Z (int __cdecl len_find(void *)):
+  00000000: 8B 54 24 04        mov         edx,dword ptr [esp+4]
+  00000004: 85 D2              test        edx,edx
+  00000006: 74 22              je          0000002A
+  00000008: 33 C0              xor         eax,eax
+  0000000A: 66 0F 1F 44 00 00  nop         word ptr [eax+eax]
+  00000010: 39 14 C5 00 00 00  cmp         dword ptr ?g_len@@3PAUCjkLen@@A[eax*8],edx
+            00
+  00000017: 75 0B              jne         00000024
+  00000019: 8B 0C C5 04 00 00  mov         ecx,dword ptr ?g_len@@3PAUCjkLen@@A[eax*8+4]
+            00
+  00000020: 85 C9              test        ecx,ecx
+  00000022: 7F 09              jg          0000002D
+  00000024: 40                 inc         eax
+  00000025: 83 F8 0C           cmp         eax,0Ch
+  00000028: 7C E6              jl          00000010
+  0000002A: 33 C0              xor         eax,eax
+  0000002C: C3                 ret
+  0000002D: 8B C1              mov         eax,ecx
+  0000002F: C3                 ret
+
+?len_put@@YAXPAXH@Z (void __cdecl len_put(void *,int)):
+  00000000: 56                 push        esi
+  00000001: 8B 74 24 08        mov         esi,dword ptr [esp+8]
+  00000005: 85 F6              test        esi,esi
+  00000007: 74 61              je          0000006A
+  00000009: 33 C9              xor         ecx,ecx
+  0000000B: 0F 1F 44 00 00     nop         dword ptr [eax+eax]
+  00000010: 39 34 CD 00 00 00  cmp         dword ptr ?g_len@@3PAUCjkLen@@A[ecx*8],esi
+            00
+  00000017: 74 1F              je          00000038
+  00000019: 41                 inc         ecx
+  0000001A: 83 F9 0C           cmp         ecx,0Ch
+  0000001D: 7C F1              jl          00000010
+  0000001F: 8B 0D 00 00 00 00  mov         ecx,dword ptr [?g_lenNext@@3HA]
+  00000025: 57                 push        edi
+  00000026: BF 0C 00 00 00     mov         edi,0Ch
+  0000002B: 8D 41 01           lea         eax,[ecx+1]
+  0000002E: 99                 cdq
+  0000002F: F7 FF              idiv        eax,edi
+  00000031: 5F                 pop         edi
+  00000032: 89 15 00 00 00 00  mov         dword ptr [?g_lenNext@@3HA],edx
+  00000038: 8B 54 24 0C        mov         edx,dword ptr [esp+0Ch]
+  0000003C: C7 04 CD 00 00 00  mov         dword ptr ?g_len@@3PAUCjkLen@@A[ecx*8],0
+            00 00 00 00 00
+  00000047: C7 04 CD 04 00 00  mov         dword ptr ?g_len@@3PAUCjkLen@@A[ecx*8+4],0
+            00 00 00 00 00
+  00000052: 8D 42 FF           lea         eax,[edx-1]
+  00000055: 3D F8 00 00 00     cmp         eax,0F8h
+  0000005A: 77 0E              ja          0000006A
+  0000005C: 89 14 CD 04 00 00  mov         dword ptr ?g_len@@3PAUCjkLen@@A[ecx*8+4],edx
+            00
+  00000063: 89 34 CD 00 00 00  mov         dword ptr ?g_len@@3PAUCjkLen@@A[ecx*8],esi
+            00
+  0000006A: 5E                 pop         esi
+  0000006B: C3                 ret
+
+?log_msg@@YAXPBDZZ (void __cdecl log_msg(char const *,...)):
+  00000000: 81 EC 08 01 00 00  sub         esp,108h
+  00000006: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  0000000B: 33 C4              xor         eax,esp
+  0000000D: 89 84 24 04 01 00  mov         dword ptr [esp+104h],eax
+            00
+  00000014: 56                 push        esi
+  00000015: 8D 84 24 14 01 00  lea         eax,[esp+114h]
+            00
+  0000001C: 50                 push        eax
+  0000001D: FF B4 24 14 01 00  push        dword ptr [esp+114h]
+            00
+  00000024: 8D 44 24 10        lea         eax,[esp+10h]
+  00000028: 50                 push        eax
+  00000029: FF 15 00 00 00 00  call        dword ptr [__imp__wvsprintfA@12]
+  0000002F: 6A 00              push        0
+  00000031: 68 80 00 00 00     push        80h
+  00000036: 6A 04              push        4
+  00000038: 6A 00              push        0
+  0000003A: 6A 01              push        1
+  0000003C: 68 00 00 00 40     push        40000000h
+  00000041: 68 00 00 00 00     push        offset ??_C@_0BB@KKDBKCDG@CJK_hook_log?4txt@
+  00000046: FF 15 00 00 00 00  call        dword ptr [__imp__CreateFileA@28]
+  0000004C: 8B F0              mov         esi,eax
+  0000004E: 83 FE FF           cmp         esi,0FFFFFFFFh
+  00000051: 74 33              je          00000086
+  00000053: 6A 02              push        2
+  00000055: 6A 00              push        0
+  00000057: 6A 00              push        0
+  00000059: 56                 push        esi
+  0000005A: FF 15 00 00 00 00  call        dword ptr [__imp__SetFilePointer@16]
+  00000060: 6A 00              push        0
+  00000062: 8D 44 24 08        lea         eax,[esp+8]
+  00000066: 50                 push        eax
+  00000067: 8D 44 24 10        lea         eax,[esp+10h]
+  0000006B: 50                 push        eax
+  0000006C: FF 15 00 00 00 00  call        dword ptr [__imp__lstrlenA@4]
+  00000072: 50                 push        eax
+  00000073: 8D 44 24 14        lea         eax,[esp+14h]
+  00000077: 50                 push        eax
+  00000078: 56                 push        esi
+  00000079: FF 15 00 00 00 00  call        dword ptr [__imp__WriteFile@20]
+  0000007F: 56                 push        esi
+  00000080: FF 15 00 00 00 00  call        dword ptr [__imp__CloseHandle@4]
+  00000086: 8B 8C 24 08 01 00  mov         ecx,dword ptr [esp+108h]
+            00
+  0000008D: 5E                 pop         esi
+  0000008E: 33 CC              xor         ecx,esp
+  00000090: E8 00 00 00 00     call        @__security_check_cookie@4
+  00000095: 81 C4 08 01 00 00  add         esp,108h
+  0000009B: C3                 ret
+
+?looks_like_subtitle@@YAHK@Z (int __cdecl looks_like_subtitle(unsigned long)):
+  00000000: 8B 4C 24 04        mov         ecx,dword ptr [esp+4]
+  00000004: 56                 push        esi
+  00000005: 57                 push        edi
+  00000006: 8D 81 00 00 FF FF  lea         eax,[ecx+FFFF0000h]
+  0000000C: 3D FF FF FD 7F     cmp         eax,7FFDFFFFh
+  00000011: 77 5E              ja          00000071
+  00000013: 64 A1 18 00 00 00  mov         eax,dword ptr fs:[00000018h]
+  00000019: 3B 48 08           cmp         ecx,dword ptr [eax+8]
+  0000001C: 72 05              jb          00000023
+  0000001E: 3B 48 04           cmp         ecx,dword ptr [eax+4]
+  00000021: 72 4E              jb          00000071
+  00000023: 66 8B 01           mov         ax,word ptr [ecx]
+  00000026: 0F B7 C0           movzx       eax,ax
+  00000029: 66 85 C0           test        ax,ax
+  0000002C: 78 43              js          00000071
+  0000002E: 0F B7 51 02        movzx       edx,word ptr [ecx+2]
+  00000032: 8D 71 02           lea         esi,[ecx+2]
+  00000035: 80 FA A7           cmp         dl,0A7h
+  00000038: 74 4B              je          00000085
+  0000003A: 33 C0              xor         eax,eax
+  0000003C: BF A7 00 00 00     mov         edi,0A7h
+  00000041: 0F B7 0C 46        movzx       ecx,word ptr [esi+eax*2]
+  00000045: 66 85 C9           test        cx,cx
+  00000048: 74 13              je          0000005D
+  0000004A: 66 3B CF           cmp         cx,di
+  0000004D: 75 08              jne         00000057
+  0000004F: 66 83 7C 46 02 4C  cmp         word ptr [esi+eax*2+2],4Ch
+  00000055: 74 2E              je          00000085
+  00000057: 40                 inc         eax
+  00000058: 83 F8 18           cmp         eax,18h
+  0000005B: 7C E4              jl          00000041
+  0000005D: B8 00 4E 00 00     mov         eax,4E00h
+  00000062: 66 3B D0           cmp         dx,ax
+  00000065: 72 0F              jb          00000076
+  00000067: B8 FF 9F 00 00     mov         eax,9FFFh
+  0000006C: 66 3B D0           cmp         dx,ax
+  0000006F: 76 14              jbe         00000085
+  00000071: 5F                 pop         edi
+  00000072: 33 C0              xor         eax,eax
+  00000074: 5E                 pop         esi
+  00000075: C3                 ret
+  00000076: 83 FA 20           cmp         edx,20h
+  00000079: 74 0A              je          00000085
+  0000007B: B8 00 30 00 00     mov         eax,3000h
+  00000080: 66 3B D0           cmp         dx,ax
+  00000083: 75 EC              jne         00000071
+  00000085: 5F                 pop         edi
+  00000086: B8 01 00 00 00     mov         eax,1
+  0000008B: 5E                 pop         esi
+  0000008C: C3                 ret
+
+?process_subtitle_text@@YAXK@Z (void __cdecl process_subtitle_text(unsigned long)):
+  00000000: 81 EC 14 04 00 00  sub         esp,414h
+  00000006: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  0000000B: 33 C4              xor         eax,esp
+  0000000D: 89 84 24 10 04 00  mov         dword ptr [esp+410h],eax
+            00
+  00000014: 8B 8C 24 18 04 00  mov         ecx,dword ptr [esp+418h]
+            00
+  0000001B: 89 4C 24 08        mov         dword ptr [esp+8],ecx
+  0000001F: 85 C9              test        ecx,ecx
+  00000021: 0F 84 75 04 00 00  je          0000049C
+  00000027: 8D 81 00 00 FF FF  lea         eax,[ecx-10000h]
+  0000002D: 3D FF FF FD 7F     cmp         eax,7FFDFFFFh
+  00000032: 0F 87 64 04 00 00  ja          0000049C
+  00000038: 0F B7 01           movzx       eax,word ptr [ecx]
+  0000003B: 89 44 24 0C        mov         dword ptr [esp+0Ch],eax
+  0000003F: 66 85 C0           test        ax,ax
+  00000042: 78 08              js          0000004C
+  00000044: 0D 00 80 00 00     or          eax,8000h
+  00000049: 66 89 01           mov         word ptr [ecx],ax
+  0000004C: 53                 push        ebx
+  0000004D: 55                 push        ebp
+  0000004E: 8D 69 02           lea         ebp,[ecx+2]
+  00000051: BA A7 00 00 00     mov         edx,0A7h
+  00000056: 0F B7 4D 00        movzx       ecx,word ptr [ebp]
+  0000005A: 56                 push        esi
+  0000005B: 57                 push        edi
+  0000005C: 3A CA              cmp         cl,dl
+  0000005E: 75 13              jne         00000073
+  00000060: 66 3B CA           cmp         cx,dx
+  00000063: 75 07              jne         0000006C
+  00000065: 66 83 7D 02 4C     cmp         word ptr [ebp+2],4Ch
+  0000006A: 74 07              je          00000073
+  0000006C: C7 45 00 20 00 20  mov         dword ptr [ebp],200020h
+            00
+  00000073: 33 C9              xor         ecx,ecx
+  00000075: 89 4C 24 14        mov         dword ptr [esp+14h],ecx
+  00000079: 0F 1F 80 00 00 00  nop         dword ptr [eax]
+            00
+  00000080: 66 83 7C 4D 00 00  cmp         word ptr [ebp+ecx*2],0
+  00000086: 74 4D              je          000000D5
+  00000088: 66 83 7C 4D 02 00  cmp         word ptr [ebp+ecx*2+2],0
+  0000008E: 74 40              je          000000D0
+  00000090: 66 83 7C 4D 04 00  cmp         word ptr [ebp+ecx*2+4],0
+  00000096: 8D 41 02           lea         eax,[ecx+2]
+  00000099: 74 2F              je          000000CA
+  0000009B: 66 83 7C 4D 06 00  cmp         word ptr [ebp+ecx*2+6],0
+  000000A1: 8D 41 03           lea         eax,[ecx+3]
+  000000A4: 74 24              je          000000CA
+  000000A6: 66 83 7C 4D 08 00  cmp         word ptr [ebp+ecx*2+8],0
+  000000AC: 8D 41 04           lea         eax,[ecx+4]
+  000000AF: 74 19              je          000000CA
+  000000B1: 66 83 7C 4D 0A 00  cmp         word ptr [ebp+ecx*2+0Ah],0
+  000000B7: 8D 41 05           lea         eax,[ecx+5]
+  000000BA: 74 0E              je          000000CA
+  000000BC: 83 C1 06           add         ecx,6
+  000000BF: 89 4C 24 14        mov         dword ptr [esp+14h],ecx
+  000000C3: 83 F9 78           cmp         ecx,78h
+  000000C6: 7C B8              jl          00000080
+  000000C8: EB 0B              jmp         000000D5
+  000000CA: 89 44 24 14        mov         dword ptr [esp+14h],eax
+  000000CE: EB 05              jmp         000000D5
+  000000D0: 41                 inc         ecx
+  000000D1: 89 4C 24 14        mov         dword ptr [esp+14h],ecx
+  000000D5: B9 00 30 00 00     mov         ecx,3000h
+  000000DA: 83 CE FF           or          esi,0FFFFFFFFh
+  000000DD: 89 74 24 10        mov         dword ptr [esp+10h],esi
+  000000E1: 33 F6              xor         esi,esi
+  000000E3: 8D 51 02           lea         edx,[ecx+2]
+  000000E6: 8D 79 01           lea         edi,[ecx+1]
+  000000E9: 0F 1F 80 00 00 00  nop         dword ptr [eax]
+            00
+  000000F0: 0F B7 5C 75 00     movzx       ebx,word ptr [ebp+esi*2]
+  000000F5: 66 85 DB           test        bx,bx
+  000000F8: 0F 84 E3 01 00 00  je          000002E1
+  000000FE: B8 A7 00 00 00     mov         eax,0A7h
+  00000103: 66 3B D8           cmp         bx,ax
+  00000106: 75 67              jne         0000016F
+  00000108: 46                 inc         esi
+  00000109: 83 FE 78           cmp         esi,78h
+  0000010C: 7D 17              jge         00000125
+  0000010E: 66 90              nop
+  00000110: 0F B7 44 75 00     movzx       eax,word ptr [ebp+esi*2]
+  00000115: 66 85 C0           test        ax,ax
+  00000118: 74 0B              je          00000125
+  0000011A: 83 F8 20           cmp         eax,20h
+  0000011D: 74 06              je          00000125
+  0000011F: 46                 inc         esi
+  00000120: 83 FE 78           cmp         esi,78h
+  00000123: 7C EB              jl          00000110
+  00000125: 8D 5E FF           lea         ebx,[esi-1]
+  00000128: 89 5C 24 10        mov         dword ptr [esp+10h],ebx
+  0000012C: 83 FE 78           cmp         esi,78h
+  0000012F: 0F 8D A2 01 00 00  jge         000002D7
+  00000135: 0F B7 44 75 00     movzx       eax,word ptr [ebp+esi*2]
+  0000013A: 66 85 C0           test        ax,ax
+  0000013D: 0F 84 94 01 00 00  je          000002D7
+  00000143: 83 F8 20           cmp         eax,20h
+  00000146: 0F 84 8B 01 00 00  je          000002D7
+  0000014C: 66 3B C1           cmp         ax,cx
+  0000014F: 0F 84 82 01 00 00  je          000002D7
+  00000155: 84 C0              test        al,al
+  00000157: 0F 95 C1           setne       cl
+  0000015A: A9 00 FF 00 00     test        eax,0FF00h
+  0000015F: 0F 95 C0           setne       al
+  00000162: 84 C8              test        al,cl
+  00000164: 0F 84 77 01 00 00  je          000002E1
+  0000016A: E9 63 01 00 00     jmp         000002D2
+  0000016F: 66 3B DA           cmp         bx,dx
+  00000172: 74 2D              je          000001A1
+  00000174: 66 3B DF           cmp         bx,di
+  00000177: 74 28              je          000001A1
+  00000179: B8 01 FF 00 00     mov         eax,0FF01h
+  0000017E: 66 3B D8           cmp         bx,ax
+  00000181: 74 1E              je          000001A1
+  00000183: B8 1F FF 00 00     mov         eax,0FF1Fh
+  00000188: 66 3B D8           cmp         bx,ax
+  0000018B: 74 14              je          000001A1
+  0000018D: B8 14 20 00 00     mov         eax,2014h
+  00000192: 66 3B D8           cmp         bx,ax
+  00000195: 74 0A              je          000001A1
+  00000197: B8 0C FF 00 00     mov         eax,0FF0Ch
+  0000019C: 66 3B D8           cmp         bx,ax
+  0000019F: 75 35              jne         000001D6
+  000001A1: 8D 56 01           lea         edx,[esi+1]
+  000001A4: 83 FA 78           cmp         edx,78h
+  000001A7: 7D 2D              jge         000001D6
+  000001A9: 0F B7 44 75 02     movzx       eax,word ptr [ebp+esi*2+2]
+  000001AE: 66 85 C0           test        ax,ax
+  000001B1: 74 23              je          000001D6
+  000001B3: 84 C0              test        al,al
+  000001B5: 0F 95 C1           setne       cl
+  000001B8: A9 00 FF 00 00     test        eax,0FF00h
+  000001BD: 0F 95 C0           setne       al
+  000001C0: 84 C8              test        al,cl
+  000001C2: 75 12              jne         000001D6
+  000001C4: 52                 push        edx
+  000001C5: 55                 push        ebp
+  000001C6: E8 00 00 00 00     call        ?junk_ahead@@YAHPBGH@Z
+  000001CB: 83 C4 08           add         esp,8
+  000001CE: 85 C0              test        eax,eax
+  000001D0: 0F 85 0F 01 00 00  jne         000002E5
+  000001D6: 8B FB              mov         edi,ebx
+  000001D8: 81 E7 00 FF 00 00  and         edi,0FF00h
+  000001DE: 84 DB              test        bl,bl
+  000001E0: 0F 95 C1           setne       cl
+  000001E3: 66 85 FF           test        di,di
+  000001E6: 0F 95 C0           setne       al
+  000001E9: 84 C8              test        al,cl
+  000001EB: 74 46              je          00000233
+  000001ED: 53                 push        ebx
+  000001EE: E8 00 00 00 00     call        ?is_body_char@@YAHG@Z
+  000001F3: 83 C4 04           add         esp,4
+  000001F6: 85 C0              test        eax,eax
+  000001F8: 74 39              je          00000233
+  000001FA: 8D 4E 01           lea         ecx,[esi+1]
+  000001FD: 83 F9 78           cmp         ecx,78h
+  00000200: 7D 31              jge         00000233
+  00000202: 0F B7 44 75 02     movzx       eax,word ptr [ebp+esi*2+2]
+  00000207: 66 85 C0           test        ax,ax
+  0000020A: 74 27              je          00000233
+  0000020C: 84 C0              test        al,al
+  0000020E: 75 23              jne         00000233
+  00000210: A9 00 FF 00 00     test        eax,0FF00h
+  00000215: 74 1C              je          00000233
+  00000217: BA 00 30 00 00     mov         edx,3000h
+  0000021C: 66 3B C2           cmp         ax,dx
+  0000021F: 74 12              je          00000233
+  00000221: 51                 push        ecx
+  00000222: 55                 push        ebp
+  00000223: E8 00 00 00 00     call        ?junk_ahead@@YAHPBGH@Z
+  00000228: 83 C4 08           add         esp,8
+  0000022B: 85 C0              test        eax,eax
+  0000022D: 0F 85 B2 00 00 00  jne         000002E5
+  00000233: 53                 push        ebx
+  00000234: E8 00 00 00 00     call        ?is_junk_char@@YAHG@Z
+  00000239: 83 C4 04           add         esp,4
+  0000023C: 85 C0              test        eax,eax
+  0000023E: 0F 85 9D 00 00 00  jne         000002E1
+  00000244: 66 85 FF           test        di,di
+  00000247: 75 70              jne         000002B9
+  00000249: 8D 43 E0           lea         eax,[ebx-20h]
+  0000024C: 66 83 F8 5E        cmp         ax,5Eh
+  00000250: 0F 87 8B 00 00 00  ja          000002E1
+  00000256: 8B CE              mov         ecx,esi
+  00000258: 83 FE 78           cmp         esi,78h
+  0000025B: 7D 37              jge         00000294
+  0000025D: 0F 1F 00           nop         dword ptr [eax]
+  00000260: 0F B7 44 4D 00     movzx       eax,word ptr [ebp+ecx*2]
+  00000265: 8B D0              mov         edx,eax
+  00000267: A9 00 FF 00 00     test        eax,0FF00h
+  0000026C: 75 12              jne         00000280
+  0000026E: 83 F8 20           cmp         eax,20h
+  00000271: 72 0D              jb          00000280
+  00000273: 83 F8 7E           cmp         eax,7Eh
+  00000276: 77 08              ja          00000280
+  00000278: 41                 inc         ecx
+  00000279: 83 F9 78           cmp         ecx,78h
+  0000027C: 7C E2              jl          00000260
+  0000027E: EB 14              jmp         00000294
+  00000280: 8B C2              mov         eax,edx
+  00000282: 66 85 C0           test        ax,ax
+  00000285: 74 0D              je          00000294
+  00000287: 50                 push        eax
+  00000288: E8 00 00 00 00     call        ?is_body_char@@YAHG@Z
+  0000028D: 83 C4 04           add         esp,4
+  00000290: 85 C0              test        eax,eax
+  00000292: 74 4D              je          000002E1
+  00000294: 83 FB 20           cmp         ebx,20h
+  00000297: 75 0C              jne         000002A5
+  00000299: B8 00 30 00 00     mov         eax,3000h
+  0000029E: 66 89 44 75 00     mov         word ptr [ebp+esi*2],ax
+  000002A3: EB 21              jmp         000002C6
+  000002A5: 0F B7 44 75 00     movzx       eax,word ptr [ebp+esi*2]
+  000002AA: 05 E0 FE FF FF     add         eax,0FFFFFEE0h
+  000002AF: 0F B7 C0           movzx       eax,ax
+  000002B2: 66 89 44 75 00     mov         word ptr [ebp+esi*2],ax
+  000002B7: EB 0D              jmp         000002C6
+  000002B9: 53                 push        ebx
+  000002BA: E8 00 00 00 00     call        ?is_body_char@@YAHG@Z
+  000002BF: 83 C4 04           add         esp,4
+  000002C2: 85 C0              test        eax,eax
+  000002C4: 74 1B              je          000002E1
+  000002C6: BF 01 30 00 00     mov         edi,3001h
+  000002CB: 89 74 24 10        mov         dword ptr [esp+10h],esi
+  000002CF: 8D 57 01           lea         edx,[edi+1]
+  000002D2: B9 00 30 00 00     mov         ecx,3000h
+  000002D7: 46                 inc         esi
+  000002D8: 83 FE 78           cmp         esi,78h
+  000002DB: 0F 8C 0F FE FF FF  jl          000000F0
+  000002E1: 8B 74 24 10        mov         esi,dword ptr [esp+10h]
+  000002E5: 83 FE 74           cmp         esi,74h
+  000002E8: 7E 0C              jle         000002F6
+  000002EA: BF 75 00 00 00     mov         edi,75h
+  000002EF: 8B C7              mov         eax,edi
+  000002F1: 8D 4F 05           lea         ecx,[edi+5]
+  000002F4: EB 0C              jmp         00000302
+  000002F6: 8D 7E 01           lea         edi,[esi+1]
+  000002F9: 8B C7              mov         eax,edi
+  000002FB: 8D 4E 06           lea         ecx,[esi+6]
+  000002FE: 3B C1              cmp         eax,ecx
+  00000300: 7D 11              jge         00000313
+  00000302: 83 F8 78           cmp         eax,78h
+  00000305: 7D 0C              jge         00000313
+  00000307: 33 D2              xor         edx,edx
+  00000309: 66 89 54 45 00     mov         word ptr [ebp+eax*2],dx
+  0000030E: 40                 inc         eax
+  0000030F: 3B C1              cmp         eax,ecx
+  00000311: 7C EF              jl          00000302
+  00000313: BE 01 00 00 00     mov         esi,1
+  00000318: F0 0F C1 35 00 00  lock xadd   dword ptr [?s_logCnt@?DK@??process_subtitle_text@@YAXK@Z@4JC],esi
+            00 00
+  00000320: 46                 inc         esi
+  00000321: 33 C0              xor         eax,eax
+  00000323: C7 44 24 10 00 00  mov         dword ptr [esp+10h],0
+            00 00
+  0000032B: 85 FF              test        edi,edi
+  0000032D: 7E 28              jle         00000357
+  0000032F: BA 20 FF 00 00     mov         edx,0FF20h
+  00000334: 83 F8 60           cmp         eax,60h
+  00000337: 73 1E              jae         00000357
+  00000339: 0F B7 4C 45 00     movzx       ecx,word ptr [ebp+eax*2]
+  0000033E: 83 F9 40           cmp         ecx,40h
+  00000341: 74 0C              je          0000034F
+  00000343: 66 3B CA           cmp         cx,dx
+  00000346: 74 07              je          0000034F
+  00000348: 40                 inc         eax
+  00000349: 3B C7              cmp         eax,edi
+  0000034B: 7C E7              jl          00000334
+  0000034D: EB 08              jmp         00000357
+  0000034F: C7 44 24 10 01 00  mov         dword ptr [esp+10h],1
+            00 00
+  00000357: 8B 5C 24 14        mov         ebx,dword ptr [esp+14h]
+  0000035B: 83 FE 19           cmp         esi,19h
+  0000035E: 7E 2D              jle         0000038D
+  00000360: 83 FB 19           cmp         ebx,19h
+  00000363: 7F 28              jg          0000038D
+  00000365: B8 1F 85 EB 51     mov         eax,51EB851Fh
+  0000036A: 8B CE              mov         ecx,esi
+  0000036C: F7 EE              imul        esi
+  0000036E: C1 FA 05           sar         edx,5
+  00000371: 8B C2              mov         eax,edx
+  00000373: C1 E8 1F           shr         eax,1Fh
+  00000376: 03 C2              add         eax,edx
+  00000378: 6B C0 64           imul        eax,eax,64h
+  0000037B: 2B C8              sub         ecx,eax
+  0000037D: 83 F9 01           cmp         ecx,1
+  00000380: 74 0B              je          0000038D
+  00000382: 83 7C 24 10 00     cmp         dword ptr [esp+10h],0
+  00000387: 0F 84 04 01 00 00  je          00000491
+  0000038D: 8B 44 24 1C        mov         eax,dword ptr [esp+1Ch]
+  00000391: 53                 push        ebx
+  00000392: 57                 push        edi
+  00000393: 0F B7 C0           movzx       eax,ax
+  00000396: 50                 push        eax
+  00000397: FF 74 24 24        push        dword ptr [esp+24h]
+  0000039B: 8D 44 24 30        lea         eax,[esp+30h]
+  0000039F: 56                 push        esi
+  000003A0: 68 00 00 00 00     push        offset ??_C@_0DC@LAMEHJKD@?$FLSUB?5?$CFld?$FN?5dh?$DN?$CF08X?5flags?$DN?$CF04X?5fi@
+  000003A5: 50                 push        eax
+  000003A6: FF 15 00 00 00 00  call        dword ptr [__imp__wsprintfA]
+  000003AC: 8D 74 24 3C        lea         esi,[esp+3Ch]
+  000003B0: 83 C4 1C           add         esp,1Ch
+  000003B3: 03 F0              add         esi,eax
+  000003B5: 33 DB              xor         ebx,ebx
+  000003B7: 8D 47 18           lea         eax,[edi+18h]
+  000003BA: 66 0F 1F 44 00 00  nop         word ptr [eax+eax]
+  000003C0: 3B D8              cmp         ebx,eax
+  000003C2: 7D 2B              jge         000003EF
+  000003C4: 0F B7 44 5D 00     movzx       eax,word ptr [ebp+ebx*2]
+  000003C9: 50                 push        eax
+  000003CA: 3B DF              cmp         ebx,edi
+  000003CC: 7D 07              jge         000003D5
+  000003CE: 68 00 00 00 00     push        offset ??_C@_05DABPEGAD@?$CF04X?5@
+  000003D3: EB 05              jmp         000003DA
+  000003D5: 68 00 00 00 00     push        offset ??_C@_07KAJGHONK@?$FL?$CF04X?$FN?5@
+  000003DA: 56                 push        esi
+  000003DB: FF 15 00 00 00 00  call        dword ptr [__imp__wsprintfA]
+  000003E1: 43                 inc         ebx
+  000003E2: 03 F0              add         esi,eax
+  000003E4: 83 C4 0C           add         esp,0Ch
+  000003E7: 8D 47 18           lea         eax,[edi+18h]
+  000003EA: 83 FB 60           cmp         ebx,60h
+  000003ED: 7C D1              jl          000003C0
+  000003EF: 8B 1D 00 00 00 00  mov         ebx,dword ptr [__imp__wsprintfA]
+  000003F5: 68 00 00 00 00     push        offset ??_C@_01EEMJAFIK@?6@
+  000003FA: 56                 push        esi
+  000003FB: FF D3              call        ebx
+  000003FD: 03 F0              add         esi,eax
+  000003FF: 68 00 00 00 00     push        offset ??_C@_06OALGBBCF@tail?3?5@
+  00000404: 56                 push        esi
+  00000405: FF D3              call        ebx
+  00000407: 03 F0              add         esi,eax
+  00000409: 83 C4 10           add         esp,10h
+  0000040C: 8D 47 08           lea         eax,[edi+8]
+  0000040F: 89 44 24 18        mov         dword ptr [esp+18h],eax
+  00000413: 3B F8              cmp         edi,eax
+  00000415: 7D 1F              jge         00000436
+  00000417: 83 FF 78           cmp         edi,78h
+  0000041A: 7D 1A              jge         00000436
+  0000041C: 0F B7 44 7D 00     movzx       eax,word ptr [ebp+edi*2]
+  00000421: 50                 push        eax
+  00000422: 68 00 00 00 00     push        offset ??_C@_05DABPEGAD@?$CF04X?5@
+  00000427: 56                 push        esi
+  00000428: FF D3              call        ebx
+  0000042A: 47                 inc         edi
+  0000042B: 83 C4 0C           add         esp,0Ch
+  0000042E: 03 F0              add         esi,eax
+  00000430: 3B 7C 24 18        cmp         edi,dword ptr [esp+18h]
+  00000434: 7C E1              jl          00000417
+  00000436: 68 00 00 00 00     push        offset ??_C@_01EEMJAFIK@?6@
+  0000043B: 56                 push        esi
+  0000043C: FF D3              call        ebx
+  0000043E: 83 C4 08           add         esp,8
+  00000441: 03 F0              add         esi,eax
+  00000443: 6A 00              push        0
+  00000445: 68 80 00 00 00     push        80h
+  0000044A: 6A 04              push        4
+  0000044C: 6A 00              push        0
+  0000044E: 6A 01              push        1
+  00000450: 68 00 00 00 40     push        40000000h
+  00000455: 68 00 00 00 00     push        offset ??_C@_0BA@FJHDLMGA@CJK_sub_log?4txt@
+  0000045A: FF 15 00 00 00 00  call        dword ptr [__imp__CreateFileA@28]
+  00000460: 8B F8              mov         edi,eax
+  00000462: 83 FF FF           cmp         edi,0FFFFFFFFh
+  00000465: 74 2A              je          00000491
+  00000467: 6A 02              push        2
+  00000469: 6A 00              push        0
+  0000046B: 6A 00              push        0
+  0000046D: 57                 push        edi
+  0000046E: FF 15 00 00 00 00  call        dword ptr [__imp__SetFilePointer@16]
+  00000474: 6A 00              push        0
+  00000476: 8D 44 24 1C        lea         eax,[esp+1Ch]
+  0000047A: 50                 push        eax
+  0000047B: 8D 44 24 28        lea         eax,[esp+28h]
+  0000047F: 2B F0              sub         esi,eax
+  00000481: 56                 push        esi
+  00000482: 50                 push        eax
+  00000483: 57                 push        edi
+  00000484: FF 15 00 00 00 00  call        dword ptr [__imp__WriteFile@20]
+  0000048A: 57                 push        edi
+  0000048B: FF 15 00 00 00 00  call        dword ptr [__imp__CloseHandle@4]
+  00000491: F0 FF 05 00 00 00  lock inc    dword ptr [?g_subHits@@3JC]
+            00
+  00000498: 5F                 pop         edi
+  00000499: 5E                 pop         esi
+  0000049A: 5D                 pop         ebp
+  0000049B: 5B                 pop         ebx
+  0000049C: 8B 8C 24 10 04 00  mov         ecx,dword ptr [esp+410h]
+            00
+  000004A3: 33 CC              xor         ecx,esp
+  000004A5: E8 00 00 00 00     call        @__security_check_cookie@4
+  000004AA: 81 C4 14 04 00 00  add         esp,414h
+  000004B0: C3                 ret
+
+?safe_process_subtitle_text@@YAXKK@Z (void __cdecl safe_process_subtitle_text(unsigned long,unsigned long)):
+  00000000: 55                 push        ebp
+  00000001: 8B EC              mov         ebp,esp
+  00000003: 6A FE              push        0FFFFFFFEh
+  00000005: 68 00 00 00 00     push        offset __sehtable$?safe_process_subtitle_text@@YAXKK@Z
+  0000000A: 68 00 00 00 00     push        offset __except_handler4
+  0000000F: 64 A1 00 00 00 00  mov         eax,dword ptr fs:[00000000h]
+  00000015: 50                 push        eax
+  00000016: 83 EC 08           sub         esp,8
+  00000019: 53                 push        ebx
+  0000001A: 56                 push        esi
+  0000001B: 57                 push        edi
+  0000001C: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  00000021: 31 45 F8           xor         dword ptr [ebp-8],eax
+  00000024: 33 C5              xor         eax,ebp
+  00000026: 50                 push        eax
+  00000027: 8D 45 F0           lea         eax,[ebp-10h]
+  0000002A: 64 A3 00 00 00 00  mov         dword ptr fs:[00000000h],eax
+  00000030: 89 65 E8           mov         dword ptr [ebp-18h],esp
+  00000033: C7 45 FC 00 00 00  mov         dword ptr [ebp-4],0
+            00
+  0000003A: 8B 75 08           mov         esi,dword ptr [ebp+8]
+  0000003D: 56                 push        esi
+  0000003E: E8 00 00 00 00     call        ?looks_like_subtitle@@YAHK@Z
+  00000043: 83 C4 04           add         esp,4
+  00000046: 85 C0              test        eax,eax
+  00000048: 74 09              je          00000053
+  0000004A: 56                 push        esi
+  0000004B: E8 00 00 00 00     call        ?process_subtitle_text@@YAXK@Z
+  00000050: 83 C4 04           add         esp,4
+  00000053: 8B 7D 0C           mov         edi,dword ptr [ebp+0Ch]
+  00000056: 8D 87 FC FF FE FF  lea         eax,[edi-10004h]
+  0000005C: 3D FB FF FD 7F     cmp         eax,7FFDFFFBh
+  00000061: 77 28              ja          0000008B
+  00000063: 8B 7F FC           mov         edi,dword ptr [edi-4]
+  00000066: 3B FE              cmp         edi,esi
+  00000068: 74 21              je          0000008B
+  0000006A: 57                 push        edi
+  0000006B: E8 00 00 00 00     call        ?looks_like_subtitle@@YAHK@Z
+  00000070: 83 C4 04           add         esp,4
+  00000073: 85 C0              test        eax,eax
+  00000075: 74 14              je          0000008B
+  00000077: 57                 push        edi
+  00000078: E8 00 00 00 00     call        ?process_subtitle_text@@YAXK@Z
+  0000007D: 83 C4 04           add         esp,4
+  00000080: EB 09              jmp         0000008B
+$LN8:
+  00000082: B8 01 00 00 00     mov         eax,1
+$LN10:
+  00000087: C3                 ret
+$LN9:
+  00000088: 8B 65 E8           mov         esp,dword ptr [ebp-18h]
+  0000008B: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  00000092: 8B 4D F0           mov         ecx,dword ptr [ebp-10h]
+  00000095: 64 89 0D 00 00 00  mov         dword ptr fs:[0],ecx
+            00
+  0000009C: 59                 pop         ecx
+  0000009D: 5F                 pop         edi
+  0000009E: 5E                 pop         esi
+  0000009F: 5B                 pop         ebx
+  000000A0: 8B E5              mov         esp,ebp
+  000000A2: 5D                 pop         ebp
+  000000A3: C3                 ret
+
+?tfstr_cjk_wide@@YAHPAXPBXK@Z (int __cdecl tfstr_cjk_wide(void *,void const *,unsigned long)):
+  00000000: 55                 push        ebp
+  00000001: 8B EC              mov         ebp,esp
+  00000003: 6A FE              push        0FFFFFFFEh
+  00000005: 68 00 00 00 00     push        offset __sehtable$?tfstr_cjk_wide@@YAHPAXPBXK@Z
+  0000000A: 68 00 00 00 00     push        offset __except_handler4
+  0000000F: 64 A1 00 00 00 00  mov         eax,dword ptr fs:[00000000h]
+  00000015: 50                 push        eax
+  00000016: 83 EC 20           sub         esp,20h
+  00000019: 53                 push        ebx
+  0000001A: 56                 push        esi
+  0000001B: 57                 push        edi
+  0000001C: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  00000021: 31 45 F8           xor         dword ptr [ebp-8],eax
+  00000024: 33 C5              xor         eax,ebp
+  00000026: 50                 push        eax
+  00000027: 8D 45 F0           lea         eax,[ebp-10h]
+  0000002A: 64 A3 00 00 00 00  mov         dword ptr fs:[00000000h],eax
+  00000030: 89 65 E8           mov         dword ptr [ebp-18h],esp
+  00000033: 8B 45 0C           mov         eax,dword ptr [ebp+0Ch]
+  00000036: 89 45 D4           mov         dword ptr [ebp-2Ch],eax
+  00000039: 33 F6              xor         esi,esi
+  0000003B: 89 75 E0           mov         dword ptr [ebp-20h],esi
+  0000003E: 33 FF              xor         edi,edi
+  00000040: 89 7D DC           mov         dword ptr [ebp-24h],edi
+  00000043: 33 D2              xor         edx,edx
+  00000045: 89 55 E4           mov         dword ptr [ebp-1Ch],edx
+  00000048: 39 55 08           cmp         dword ptr [ebp+8],edx
+  0000004B: 0F 84 2B 01 00 00  je          0000017C
+  00000051: 85 C0              test        eax,eax
+  00000053: 0F 84 23 01 00 00  je          0000017C
+  00000059: 89 55 FC           mov         dword ptr [ebp-4],edx
+  0000005C: 0F 1F 40 00        nop         dword ptr [eax]
+  00000060: 83 FE 7B           cmp         esi,7Bh
+  00000063: 7D 4C              jge         000000B1
+  00000065: 0F B7 1C 70        movzx       ebx,word ptr [eax+esi*2]
+  00000069: 53                 push        ebx
+  0000006A: E8 00 00 00 00     call        ?is_body_char@@YAHG@Z
+  0000006F: 83 C4 04           add         esp,4
+  00000072: 8B 55 E4           mov         edx,dword ptr [ebp-1Ch]
+  00000075: 85 C0              test        eax,eax
+  00000077: 74 35              je          000000AE
+  00000079: 8B CB              mov         ecx,ebx
+  0000007B: 83 F9 25           cmp         ecx,25h
+  0000007E: 75 07              jne         00000087
+  00000080: 42                 inc         edx
+  00000081: 89 55 E4           mov         dword ptr [ebp-1Ch],edx
+  00000084: 89 55 D0           mov         dword ptr [ebp-30h],edx
+  00000087: 8D 81 00 B2 FF FF  lea         eax,[ecx-4E00h]
+  0000008D: BB FF 51 00 00     mov         ebx,51FFh
+  00000092: 66 3B C3           cmp         ax,bx
+  00000095: 77 0E              ja          000000A5
+  00000097: 80 F9 20           cmp         cl,20h
+  0000009A: 72 05              jb          000000A1
+  0000009C: 80 F9 7E           cmp         cl,7Eh
+  0000009F: 76 04              jbe         000000A5
+  000000A1: 47                 inc         edi
+  000000A2: 89 7D DC           mov         dword ptr [ebp-24h],edi
+  000000A5: 46                 inc         esi
+  000000A6: 89 75 E0           mov         dword ptr [ebp-20h],esi
+  000000A9: 8B 45 0C           mov         eax,dword ptr [ebp+0Ch]
+  000000AC: EB B2              jmp         00000060
+  000000AE: 8B 45 0C           mov         eax,dword ptr [ebp+0Ch]
+  000000B1: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  000000B8: 83 FE 04           cmp         esi,4
+  000000BB: 7C 0E              jl          000000CB
+  000000BD: 83 FF 02           cmp         edi,2
+  000000C0: 7C 09              jl          000000CB
+  000000C2: 85 D2              test        edx,edx
+  000000C4: 75 05              jne         000000CB
+  000000C6: 8D 5A 01           lea         ebx,[edx+1]
+  000000C9: EB 02              jmp         000000CD
+  000000CB: 33 DB              xor         ebx,ebx
+  000000CD: 85 DB              test        ebx,ebx
+  000000CF: 74 68              je          00000139
+  000000D1: C7 45 FC 01 00 00  mov         dword ptr [ebp-4],1
+            00
+  000000D8: 33 C9              xor         ecx,ecx
+  000000DA: 8B 55 08           mov         edx,dword ptr [ebp+8]
+  000000DD: 89 4D D8           mov         dword ptr [ebp-28h],ecx
+  000000E0: 3B CE              cmp         ecx,esi
+  000000E2: 7D 0F              jge         000000F3
+  000000E4: 66 8B 04 48        mov         ax,word ptr [eax+ecx*2]
+  000000E8: 66 89 44 4A 04     mov         word ptr [edx+ecx*2+4],ax
+  000000ED: 41                 inc         ecx
+  000000EE: 8B 45 0C           mov         eax,dword ptr [ebp+0Ch]
+  000000F1: EB EA              jmp         000000DD
+  000000F3: 8D 0C 36           lea         ecx,[esi+esi]
+  000000F6: 33 C0              xor         eax,eax
+  000000F8: 66 89 44 11 04     mov         word ptr [ecx+edx+4],ax
+  000000FD: A1 00 00 00 00     mov         eax,dword ptr [?g_gwBase@@3KA]
+  00000102: 05 FC 45 14 00     add         eax,1445FCh
+  00000107: 89 02              mov         dword ptr [edx],eax
+  00000109: 51                 push        ecx
+  0000010A: 52                 push        edx
+  0000010B: E8 00 00 00 00     call        ?len_put@@YAXPAXH@Z
+  00000110: 83 C4 08           add         esp,8
+  00000113: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  0000011A: EB 2A              jmp         00000146
+$LN25:
+  0000011C: B8 01 00 00 00     mov         eax,1
+$LN27:
+  00000121: C3                 ret
+$LN26:
+  00000122: 8B 65 E8           mov         esp,dword ptr [ebp-18h]
+  00000125: 33 DB              xor         ebx,ebx
+  00000127: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  0000012E: 8B 45 D4           mov         eax,dword ptr [ebp-2Ch]
+  00000131: 8B 75 E0           mov         esi,dword ptr [ebp-20h]
+  00000134: 8B 7D DC           mov         edi,dword ptr [ebp-24h]
+  00000137: EB 10              jmp         00000149
+  00000139: 6A 00              push        0
+  0000013B: FF 75 08           push        dword ptr [ebp+8]
+  0000013E: E8 00 00 00 00     call        ?len_put@@YAXPAXH@Z
+  00000143: 83 C4 08           add         esp,8
+  00000146: 8B 45 0C           mov         eax,dword ptr [ebp+0Ch]
+  00000149: 53                 push        ebx
+  0000014A: 57                 push        edi
+  0000014B: 56                 push        esi
+  0000014C: 50                 push        eax
+  0000014D: FF 75 10           push        dword ptr [ebp+10h]
+  00000150: E8 00 00 00 00     call        ?tfstr_diag@@YAXKPBGHHH@Z
+  00000155: 83 C4 14           add         esp,14h
+  00000158: 8B C3              mov         eax,ebx
+  0000015A: 8B 4D F0           mov         ecx,dword ptr [ebp-10h]
+  0000015D: 64 89 0D 00 00 00  mov         dword ptr fs:[0],ecx
+            00
+  00000164: 59                 pop         ecx
+  00000165: 5F                 pop         edi
+  00000166: 5E                 pop         esi
+  00000167: 5B                 pop         ebx
+  00000168: 8B E5              mov         esp,ebp
+  0000016A: 5D                 pop         ebp
+  0000016B: C3                 ret
+$LN21:
+  0000016C: B8 01 00 00 00     mov         eax,1
+$LN23:
+  00000171: C3                 ret
+$LN22:
+  00000172: 8B 65 E8           mov         esp,dword ptr [ebp-18h]
+  00000175: C7 45 FC FE FF FF  mov         dword ptr [ebp-4],0FFFFFFFEh
+            FF
+  0000017C: 33 C0              xor         eax,eax
+  0000017E: 8B 4D F0           mov         ecx,dword ptr [ebp-10h]
+  00000181: 64 89 0D 00 00 00  mov         dword ptr fs:[0],ecx
+            00
+  00000188: 59                 pop         ecx
+  00000189: 5F                 pop         edi
+  0000018A: 5E                 pop         esi
+  0000018B: 5B                 pop         ebx
+  0000018C: 8B E5              mov         esp,ebp
+  0000018E: 5D                 pop         ebp
+  0000018F: C3                 ret
+
+?tfstr_diag@@YAXKPBGHHH@Z (void __cdecl tfstr_diag(unsigned long,unsigned short const *,int,int,int)):
+  00000000: 81 EC F4 00 00 00  sub         esp,0F4h
+  00000006: A1 00 00 00 00     mov         eax,dword ptr [___security_cookie]
+  0000000B: 33 C4              xor         eax,esp
+  0000000D: 89 84 24 F0 00 00  mov         dword ptr [esp+0F0h],eax
+            00
+  00000014: 8B 15 00 00 00 00  mov         edx,dword ptr [?s_sites@?1??tfstr_diag@@YAXKPBGHHH@Z@4HA]
+  0000001A: 83 C9 FF           or          ecx,0FFFFFFFFh
+  0000001D: 53                 push        ebx
+  0000001E: 8B 9C 24 00 01 00  mov         ebx,dword ptr [esp+100h]
+            00
+  00000025: 33 C0              xor         eax,eax
+  00000027: 55                 push        ebp
+  00000028: 8B AC 24 10 01 00  mov         ebp,dword ptr [esp+110h]
+            00
+  0000002F: 89 6C 24 14        mov         dword ptr [esp+14h],ebp
+  00000033: 57                 push        edi
+  00000034: 8B BC 24 04 01 00  mov         edi,dword ptr [esp+104h]
+            00
+  0000003B: 85 D2              test        edx,edx
+  0000003D: 7E 17              jle         00000056
+  0000003F: 90                 nop
+  00000040: 39 3C 85 00 00 00  cmp         dword ptr ?s_site@?1??tfstr_diag@@YAXKPBGHHH@Z@4PAKA[eax*4],edi
+            00
+  00000047: 74 07              je          00000050
+  00000049: 40                 inc         eax
+  0000004A: 3B C2              cmp         eax,edx
+  0000004C: 7C F2              jl          00000040
+  0000004E: EB 06              jmp         00000056
+  00000050: 8B C8              mov         ecx,eax
+  00000052: 85 C0              test        eax,eax
+  00000054: 79 25              jns         0000007B
+  00000056: 83 FA 10           cmp         edx,10h
+  00000059: 7D 1C              jge         00000077
+  0000005B: 8B CA              mov         ecx,edx
+  0000005D: 8D 41 01           lea         eax,[ecx+1]
+  00000060: 89 3C 8D 00 00 00  mov         dword ptr ?s_site@?1??tfstr_diag@@YAXKPBGHHH@Z@4PAKA[ecx*4],edi
+            00
+  00000067: A3 00 00 00 00     mov         dword ptr [?s_sites@?1??tfstr_diag@@YAXKPBGHHH@Z@4HA],eax
+  0000006C: C7 04 8D 00 00 00  mov         dword ptr ?s_cnt@?1??tfstr_diag@@YAXKPBGHHH@Z@4PAJA[ecx*4],0
+            00 00 00 00 00
+  00000077: 85 C9              test        ecx,ecx
+  00000079: 78 1C              js          00000097
+  0000007B: 8B 04 8D 00 00 00  mov         eax,dword ptr ?s_cnt@?1??tfstr_diag@@YAXKPBGHHH@Z@4PAJA[ecx*4]
+            00
+  00000082: 40                 inc         eax
+  00000083: 89 04 8D 00 00 00  mov         dword ptr ?s_cnt@?1??tfstr_diag@@YAXKPBGHHH@Z@4PAJA[ecx*4],eax
+            00
+  0000008A: 85 ED              test        ebp,ebp
+  0000008C: 75 09              jne         00000097
+  0000008E: 83 F8 03           cmp         eax,3
+  00000091: 0F 8F E7 01 00 00  jg          0000027E
+  00000097: 8B 94 24 0C 01 00  mov         edx,dword ptr [esp+10Ch]
+            00
+  0000009E: 56                 push        esi
+  0000009F: 83 FA 05           cmp         edx,5
+  000000A2: 7E 33              jle         000000D7
+  000000A4: 0F B7 7B 04        movzx       edi,word ptr [ebx+4]
+  000000A8: 0F B7 43 0A        movzx       eax,word ptr [ebx+0Ah]
+  000000AC: 0F B7 73 08        movzx       esi,word ptr [ebx+8]
+  000000B0: 0F B7 6B 06        movzx       ebp,word ptr [ebx+6]
+  000000B4: 89 7C 24 10        mov         dword ptr [esp+10h],edi
+  000000B8: 0F B7 7B 02        movzx       edi,word ptr [ebx+2]
+  000000BC: 0F B7 1B           movzx       ebx,word ptr [ebx]
+  000000BF: 89 7C 24 14        mov         dword ptr [esp+14h],edi
+  000000C3: 8B BC 24 08 01 00  mov         edi,dword ptr [esp+108h]
+            00
+  000000CA: 89 5C 24 18        mov         dword ptr [esp+18h],ebx
+  000000CE: 8B 5C 24 10        mov         ebx,dword ptr [esp+10h]
+  000000D2: E9 EF 00 00 00     jmp         000001C6
+  000000D7: 33 C0              xor         eax,eax
+  000000D9: 83 FA 04           cmp         edx,4
+  000000DC: 7E 2F              jle         0000010D
+  000000DE: 0F B7 7B 04        movzx       edi,word ptr [ebx+4]
+  000000E2: 0F B7 73 08        movzx       esi,word ptr [ebx+8]
+  000000E6: 0F B7 6B 06        movzx       ebp,word ptr [ebx+6]
+  000000EA: 89 7C 24 10        mov         dword ptr [esp+10h],edi
+  000000EE: 0F B7 7B 02        movzx       edi,word ptr [ebx+2]
+  000000F2: 0F B7 1B           movzx       ebx,word ptr [ebx]
+  000000F5: 89 7C 24 14        mov         dword ptr [esp+14h],edi
+  000000F9: 8B BC 24 08 01 00  mov         edi,dword ptr [esp+108h]
+            00
+  00000100: 89 5C 24 18        mov         dword ptr [esp+18h],ebx
+  00000104: 8B 5C 24 10        mov         ebx,dword ptr [esp+10h]
+  00000108: E9 B9 00 00 00     jmp         000001C6
+  0000010D: 33 C0              xor         eax,eax
+  0000010F: 33 F6              xor         esi,esi
+  00000111: 83 FA 03           cmp         edx,3
+  00000114: 7E 2B              jle         00000141
+  00000116: 0F B7 7B 04        movzx       edi,word ptr [ebx+4]
+  0000011A: 0F B7 6B 06        movzx       ebp,word ptr [ebx+6]
+  0000011E: 89 7C 24 10        mov         dword ptr [esp+10h],edi
+  00000122: 0F B7 7B 02        movzx       edi,word ptr [ebx+2]
+  00000126: 0F B7 1B           movzx       ebx,word ptr [ebx]
+  00000129: 89 7C 24 14        mov         dword ptr [esp+14h],edi
+  0000012D: 8B BC 24 08 01 00  mov         edi,dword ptr [esp+108h]
+            00
+  00000134: 89 5C 24 18        mov         dword ptr [esp+18h],ebx
+  00000138: 8B 5C 24 10        mov         ebx,dword ptr [esp+10h]
+  0000013C: E9 85 00 00 00     jmp         000001C6
+  00000141: 33 C0              xor         eax,eax
+  00000143: 33 F6              xor         esi,esi
+  00000145: 33 ED              xor         ebp,ebp
+  00000147: 83 FA 02           cmp         edx,2
+  0000014A: 7E 24              jle         00000170
+  0000014C: 0F B7 7B 04        movzx       edi,word ptr [ebx+4]
+  00000150: 89 7C 24 10        mov         dword ptr [esp+10h],edi
+  00000154: 0F B7 7B 02        movzx       edi,word ptr [ebx+2]
+  00000158: 0F B7 1B           movzx       ebx,word ptr [ebx]
+  0000015B: 89 7C 24 14        mov         dword ptr [esp+14h],edi
+  0000015F: 8B BC 24 08 01 00  mov         edi,dword ptr [esp+108h]
+            00
+  00000166: 89 5C 24 18        mov         dword ptr [esp+18h],ebx
+  0000016A: 8B 5C 24 10        mov         ebx,dword ptr [esp+10h]
+  0000016E: EB 56              jmp         000001C6
+  00000170: 33 C0              xor         eax,eax
+  00000172: 33 F6              xor         esi,esi
+  00000174: 33 ED              xor         ebp,ebp
+  00000176: 89 44 24 10        mov         dword ptr [esp+10h],eax
+  0000017A: 83 FA 01           cmp         edx,1
+  0000017D: 7E 1A              jle         00000199
+  0000017F: 0F B7 7B 02        movzx       edi,word ptr [ebx+2]
+  00000183: 0F B7 1B           movzx       ebx,word ptr [ebx]
+  00000186: 89 7C 24 14        mov         dword ptr [esp+14h],edi
+  0000018A: 8B BC 24 08 01 00  mov         edi,dword ptr [esp+108h]
+            00
+  00000191: 89 5C 24 18        mov         dword ptr [esp+18h],ebx
+  00000195: 8B D8              mov         ebx,eax
+  00000197: EB 2D              jmp         000001C6
+  00000199: 33 C0              xor         eax,eax
+  0000019B: 33 F6              xor         esi,esi
+  0000019D: 33 ED              xor         ebp,ebp
+  0000019F: 89 44 24 10        mov         dword ptr [esp+10h],eax
+  000001A3: 89 44 24 14        mov         dword ptr [esp+14h],eax
+  000001A7: 85 D2              test        edx,edx
+  000001A9: 7E 0B              jle         000001B6
+  000001AB: 0F B7 1B           movzx       ebx,word ptr [ebx]
+  000001AE: 89 5C 24 18        mov         dword ptr [esp+18h],ebx
+  000001B2: 8B D8              mov         ebx,eax
+  000001B4: EB 10              jmp         000001C6
+  000001B6: 89 44 24 18        mov         dword ptr [esp+18h],eax
+  000001BA: 33 F6              xor         esi,esi
+  000001BC: 33 C0              xor         eax,eax
+  000001BE: 33 ED              xor         ebp,ebp
+  000001C0: 33 DB              xor         ebx,ebx
+  000001C2: 89 44 24 14        mov         dword ptr [esp+14h],eax
+  000001C6: 85 C9              test        ecx,ecx
+  000001C8: 78 09              js          000001D3
+  000001CA: 8B 0C 8D 00 00 00  mov         ecx,dword ptr ?s_cnt@?1??tfstr_diag@@YAXKPBGHHH@Z@4PAJA[ecx*4]
+            00
+  000001D1: EB 02              jmp         000001D5
+  000001D3: 33 C9              xor         ecx,ecx
+  000001D5: 83 7C 24 1C 00     cmp         dword ptr [esp+1Ch],0
+  000001DA: 50                 push        eax
+  000001DB: 56                 push        esi
+  000001DC: 55                 push        ebp
+  000001DD: 53                 push        ebx
+  000001DE: FF 74 24 24        push        dword ptr [esp+24h]
+  000001E2: B8 00 00 00 00     mov         eax,offset ??_C@_05HMEGCHLC@STASH@
+  000001E7: FF 74 24 2C        push        dword ptr [esp+2Ch]
+  000001EB: 51                 push        ecx
+  000001EC: B9 00 00 00 00     mov         ecx,offset ??_C@_05FLPEPALJ@pass?5@
+  000001F1: 0F 44 C1           cmove       eax,ecx
+  000001F4: 50                 push        eax
+  000001F5: FF B4 24 34 01 00  push        dword ptr [esp+134h]
+            00
+  000001FC: 8D 44 24 44        lea         eax,[esp+44h]
+  00000200: 52                 push        edx
+  00000201: 57                 push        edi
+  00000202: 68 00 00 00 00     push        offset ??_C@_0EO@HBEGAPO@?$FLTFSTR?$FN?5ret?$DN?$CF05X?5n?$DN?$CF3d?5strong?$DN?$CF@
+  00000207: 50                 push        eax
+  00000208: FF 15 00 00 00 00  call        dword ptr [__imp__wsprintfA]
+  0000020E: 83 C4 34           add         esp,34h
+  00000211: B8 01 00 00 00     mov         eax,1
+  00000216: F0 0F C1 05 00 00  lock xadd   dword ptr [?s_total@?1??diag_write@@YAXPBD@Z@4JC],eax
+            00 00
+  0000021E: 40                 inc         eax
+  0000021F: 3D A0 00 00 00     cmp         eax,0A0h
+  00000224: 7F 57              jg          0000027D
+  00000226: 6A 00              push        0
+  00000228: 68 80 00 00 00     push        80h
+  0000022D: 6A 04              push        4
+  0000022F: 6A 00              push        0
+  00000231: 6A 01              push        1
+  00000233: 68 00 00 00 40     push        40000000h
+  00000238: 68 00 00 00 00     push        offset ??_C@_0BC@HCMKNIPB@CJK_tfstr_log?4txt@
+  0000023D: FF 15 00 00 00 00  call        dword ptr [__imp__CreateFileA@28]
+  00000243: 8B F0              mov         esi,eax
+  00000245: 83 FE FF           cmp         esi,0FFFFFFFFh
+  00000248: 74 33              je          0000027D
+  0000024A: 6A 02              push        2
+  0000024C: 6A 00              push        0
+  0000024E: 6A 00              push        0
+  00000250: 56                 push        esi
+  00000251: FF 15 00 00 00 00  call        dword ptr [__imp__SetFilePointer@16]
+  00000257: 6A 00              push        0
+  00000259: 8D 44 24 20        lea         eax,[esp+20h]
+  0000025D: 50                 push        eax
+  0000025E: 8D 44 24 28        lea         eax,[esp+28h]
+  00000262: 50                 push        eax
+  00000263: FF 15 00 00 00 00  call        dword ptr [__imp__lstrlenA@4]
+  00000269: 50                 push        eax
+  0000026A: 8D 44 24 2C        lea         eax,[esp+2Ch]
+  0000026E: 50                 push        eax
+  0000026F: 56                 push        esi
+  00000270: FF 15 00 00 00 00  call        dword ptr [__imp__WriteFile@20]
+  00000276: 56                 push        esi
+  00000277: FF 15 00 00 00 00  call        dword ptr [__imp__CloseHandle@4]
+  0000027D: 5E                 pop         esi
+  0000027E: 8B 8C 24 FC 00 00  mov         ecx,dword ptr [esp+0FCh]
+            00
+  00000285: 5F                 pop         edi
+  00000286: 5D                 pop         ebp
+  00000287: 5B                 pop         ebx
+  00000288: 33 CC              xor         ecx,esp
+  0000028A: E8 00 00 00 00     call        @__security_check_cookie@4
+  0000028F: 81 C4 F4 00 00 00  add         esp,0F4h
+  00000295: C3                 ret
+
+?wait_thread@@YGKPAX@Z (unsigned long __stdcall wait_thread(void *)):
+  00000000: 51                 push        ecx
+  00000001: 53                 push        ebx
+  00000002: 8B 1D 00 00 00 00  mov         ebx,dword ptr [__imp__Sleep@4]
+  00000008: 55                 push        ebp
+  00000009: 8B 2D 00 00 00 00  mov         ebp,dword ptr [__imp__GetModuleHandleA@4]
+  0000000F: 56                 push        esi
+  00000010: 57                 push        edi
+  00000011: 8B 3D 00 00 00 00  mov         edi,dword ptr [__imp__VirtualProtect@16]
+  00000017: 66 0F 1F 84 00 00  nop         word ptr [eax+eax]
+            00 00 00
+  00000020: 83 3D 00 00 00 00  cmp         dword ptr [?g_hooked@@3HA],0
+            00
+  00000027: 0F 85 49 03 00 00  jne         00000376
+  0000002D: 68 00 00 00 00     push        offset ??_C@_0O@OFAPEGOE@GameWorld?4dll@
+  00000032: FF D5              call        ebp
+  00000034: 8B D0              mov         edx,eax
+  00000036: 89 15 00 00 00 00  mov         dword ptr [?g_hGameWorld@@3PAUHINSTANCE__@@A],edx
+  0000003C: 85 D2              test        edx,edx
+  0000003E: 74 64              je          000000A4
+  00000040: 8D 82 C4 05 10 00  lea         eax,[edx+1005C4h]
+  00000046: 89 15 00 00 00 00  mov         dword ptr [?g_gwBase@@3KA],edx
+  0000004C: 8D 8A B7 0F 02 00  lea         ecx,[edx+20FB7h]
+  00000052: A3 00 00 00 00     mov         dword ptr [?g_thunkVA@@3KA],eax
+  00000057: 8D B2 B2 0F 02 00  lea         esi,[edx+20FB2h]
+  0000005D: 89 0D 00 00 00 00  mov         dword ptr [?g_retVA@@3KA],ecx
+  00000063: 8A 06              mov         al,byte ptr [esi]
+  00000065: 3C E8              cmp         al,0E8h
+  00000067: 74 1C              je          00000085
+  00000069: 0F B6 C0           movzx       eax,al
+  0000006C: 50                 push        eax
+  0000006D: 68 B2 0F 02 00     push        20FB2h
+  00000072: 68 00 00 00 00     push        offset ??_C@_0CI@KMPHKHCI@?$FLCJK?$FN?50x?$CFX?5?$LH?G?5call?5?$CI0x?$CF02X?$CJ?$KD?$KM?L?x@
+  00000077: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  0000007C: 83 C4 0C           add         esp,0Ch
+  0000007F: 6A 64              push        64h
+  00000081: FF D3              call        ebx
+  00000083: EB 9B              jmp         00000020
+  00000085: 8B 06              mov         eax,dword ptr [esi]
+  00000087: A3 00 00 00 00     mov         dword ptr [?g_origBytes@@3PAEA],eax
+  0000008C: 8A 46 04           mov         al,byte ptr [esi+4]
+  0000008F: A2 04 00 00 00     mov         byte ptr [?g_origBytes@@3PAEA+4],al
+  00000094: 8D 44 24 10        lea         eax,[esp+10h]
+  00000098: 50                 push        eax
+  00000099: 6A 40              push        40h
+  0000009B: 6A 05              push        5
+  0000009D: 56                 push        esi
+  0000009E: FF D7              call        edi
+  000000A0: 85 C0              test        eax,eax
+  000000A2: 75 09              jne         000000AD
+  000000A4: 6A 64              push        64h
+  000000A6: FF D3              call        ebx
+  000000A8: E9 73 FF FF FF     jmp         00000020
+  000000AD: B8 00 00 00 00     mov         eax,offset ?cjk_trampoline_impl@@YAXXZ
+  000000B2: C6 06 E9           mov         byte ptr [esi],0E9h
+  000000B5: 2B C6              sub         eax,esi
+  000000B7: 83 E8 05           sub         eax,5
+  000000BA: 89 46 01           mov         dword ptr [esi+1],eax
+  000000BD: 8D 44 24 10        lea         eax,[esp+10h]
+  000000C1: 50                 push        eax
+  000000C2: FF 74 24 14        push        dword ptr [esp+14h]
+  000000C6: 6A 05              push        5
+  000000C8: 56                 push        esi
+  000000C9: FF D7              call        edi
+  000000CB: 8B 1D 00 00 00 00  mov         ebx,dword ptr [__imp__GetCurrentProcess@0]
+  000000D1: 6A 05              push        5
+  000000D3: 56                 push        esi
+  000000D4: FF D3              call        ebx
+  000000D6: 8B 2D 00 00 00 00  mov         ebp,dword ptr [__imp__FlushInstructionCache@12]
+  000000DC: 50                 push        eax
+  000000DD: FF D5              call        ebp
+  000000DF: 8B 35 00 00 00 00  mov         esi,dword ptr [?g_gwBase@@3KA]
+  000000E5: 81 C6 00 4F 05 00  add         esi,54F00h
+  000000EB: C7 05 00 00 00 00  mov         dword ptr [?g_hooked@@3HA],1
+            01 00 00 00
+  000000F5: 8B 06              mov         eax,dword ptr [esi]
+  000000F7: A3 00 00 00 00     mov         dword ptr [?g_origTfstr@@3PAEA],eax
+  000000FC: 66 8B 46 04        mov         ax,word ptr [esi+4]
+  00000100: 66 A3 04 00 00 00  mov         word ptr [?g_origTfstr@@3PAEA+4],ax
+  00000106: 8A 46 06           mov         al,byte ptr [esi+6]
+  00000109: A2 06 00 00 00     mov         byte ptr [?g_origTfstr@@3PAEA+6],al
+  0000010E: 8D 44 24 10        lea         eax,[esp+10h]
+  00000112: 50                 push        eax
+  00000113: 6A 40              push        40h
+  00000115: 6A 07              push        7
+  00000117: 56                 push        esi
+  00000118: FF D7              call        edi
+  0000011A: 85 C0              test        eax,eax
+  0000011C: 74 4D              je          0000016B
+  0000011E: B8 00 00 00 00     mov         eax,offset ?cjk_tfstr_trampoline_impl@@YAXXZ
+  00000123: C6 06 E9           mov         byte ptr [esi],0E9h
+  00000126: 2B C6              sub         eax,esi
+  00000128: 83 E8 05           sub         eax,5
+  0000012B: 89 46 01           mov         dword ptr [esi+1],eax
+  0000012E: 8D 44 24 10        lea         eax,[esp+10h]
+  00000132: 50                 push        eax
+  00000133: 66 C7 46 05 90 90  mov         word ptr [esi+5],9090h
+  00000139: FF 74 24 14        push        dword ptr [esp+14h]
+  0000013D: 6A 07              push        7
+  0000013F: 56                 push        esi
+  00000140: FF D7              call        edi
+  00000142: 6A 07              push        7
+  00000144: 56                 push        esi
+  00000145: FF D3              call        ebx
+  00000147: 50                 push        eax
+  00000148: FF D5              call        ebp
+  0000014A: 68 00 00 00 00     push        offset ?cjk_tfstr_trampoline_impl@@YAXXZ
+  0000014F: 68 00 4F 05 00     push        54F00h
+  00000154: 68 00 00 00 00     push        offset ??_C@_0CJ@JBFIALBB@?$FLCJK?$FN?5v14?5TFStr?5?$LJ?$LJ?T?l?5hook?3?50x?$CFX@
+  00000159: C7 05 00 00 00 00  mov         dword ptr [?g_hookedTfstr@@3HA],1
+            01 00 00 00
+  00000163: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000168: 83 C4 0C           add         esp,0Ch
+  0000016B: 8B 35 00 00 00 00  mov         esi,dword ptr [?g_gwBase@@3KA]
+  00000171: 81 C6 1A ED 08 00  add         esi,8ED1Ah
+  00000177: 8B 06              mov         eax,dword ptr [esi]
+  00000179: A3 00 00 00 00     mov         dword ptr [?g_origConcatLen@@3PAEA],eax
+  0000017E: 8A 46 04           mov         al,byte ptr [esi+4]
+  00000181: A2 04 00 00 00     mov         byte ptr [?g_origConcatLen@@3PAEA+4],al
+  00000186: 8D 44 24 10        lea         eax,[esp+10h]
+  0000018A: 50                 push        eax
+  0000018B: 6A 40              push        40h
+  0000018D: 6A 05              push        5
+  0000018F: 56                 push        esi
+  00000190: FF D7              call        edi
+  00000192: 85 C0              test        eax,eax
+  00000194: 74 47              je          000001DD
+  00000196: B8 00 00 00 00     mov         eax,offset ?cjk_concat_len_trampoline_impl@@YAXXZ
+  0000019B: C6 06 E9           mov         byte ptr [esi],0E9h
+  0000019E: 2B C6              sub         eax,esi
+  000001A0: 83 E8 05           sub         eax,5
+  000001A3: 89 46 01           mov         dword ptr [esi+1],eax
+  000001A6: 8D 44 24 10        lea         eax,[esp+10h]
+  000001AA: 50                 push        eax
+  000001AB: FF 74 24 14        push        dword ptr [esp+14h]
+  000001AF: 6A 05              push        5
+  000001B1: 56                 push        esi
+  000001B2: FF D7              call        edi
+  000001B4: 6A 05              push        5
+  000001B6: 56                 push        esi
+  000001B7: FF D3              call        ebx
+  000001B9: 50                 push        eax
+  000001BA: FF D5              call        ebp
+  000001BC: 68 00 00 00 00     push        offset ?cjk_concat_len_trampoline_impl@@YAXXZ
+  000001C1: 68 1A ED 08 00     push        8ED1Ah
+  000001C6: 68 00 00 00 00     push        offset ??_C@_0CM@NEMLADJK@?$FLCJK?$FN?5v15b?5?F?$LE?$LN?S?$LD?$KE?$LG?H?P?$NO?U?$PN?5hook?3?50@
+  000001CB: C7 05 00 00 00 00  mov         dword ptr [?g_hookedConcatLen@@3HA],1
+            01 00 00 00
+  000001D5: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  000001DA: 83 C4 0C           add         esp,0Ch
+  000001DD: 8B 35 00 00 00 00  mov         esi,dword ptr [?g_gwBase@@3KA]
+  000001E3: B9 00 00 00 00     mov         ecx,offset ?expect4@?BC@??install_hook@@YAHXZ@4QBEB
+  000001E8: 81 C6 9A ED 08 00  add         esi,8ED9Ah
+  000001EE: 8B 06              mov         eax,dword ptr [esi]
+  000001F0: 3B 01              cmp         eax,dword ptr [ecx]
+  000001F2: 75 71              jne         00000265
+  000001F4: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  000001F8: 3A 41 04           cmp         al,byte ptr [ecx+4]
+  000001FB: 75 68              jne         00000265
+  000001FD: 8B 06              mov         eax,dword ptr [esi]
+  000001FF: A3 00 00 00 00     mov         dword ptr [?g_origConcatFin@@3PAEA],eax
+  00000204: 8A 46 04           mov         al,byte ptr [esi+4]
+  00000207: A2 04 00 00 00     mov         byte ptr [?g_origConcatFin@@3PAEA+4],al
+  0000020C: 8D 44 24 10        lea         eax,[esp+10h]
+  00000210: 50                 push        eax
+  00000211: 6A 40              push        40h
+  00000213: 6A 05              push        5
+  00000215: 56                 push        esi
+  00000216: FF D7              call        edi
+  00000218: 85 C0              test        eax,eax
+  0000021A: 74 73              je          0000028F
+  0000021C: B8 00 00 00 00     mov         eax,offset ?cjk_concat_fin_trampoline_impl@@YAXXZ
+  00000221: C6 06 E9           mov         byte ptr [esi],0E9h
+  00000224: 2B C6              sub         eax,esi
+  00000226: 83 E8 05           sub         eax,5
+  00000229: 89 46 01           mov         dword ptr [esi+1],eax
+  0000022C: 8D 44 24 10        lea         eax,[esp+10h]
+  00000230: 50                 push        eax
+  00000231: FF 74 24 14        push        dword ptr [esp+14h]
+  00000235: 6A 05              push        5
+  00000237: 56                 push        esi
+  00000238: FF D7              call        edi
+  0000023A: 6A 05              push        5
+  0000023C: 56                 push        esi
+  0000023D: FF D3              call        ebx
+  0000023F: 50                 push        eax
+  00000240: FF D5              call        ebp
+  00000242: 68 00 00 00 00     push        offset ?cjk_concat_fin_trampoline_impl@@YAXXZ
+  00000247: 68 9A ED 08 00     push        8ED9Ah
+  0000024C: 68 00 00 00 00     push        offset ??_C@_0CI@FBGCCNAM@?$FLCJK?$FN?5v16f?5?F?$LE?$LN?S?J?U?N?$LC?5hook?3?50x?$CFX?5@
+  00000251: C7 05 00 00 00 00  mov         dword ptr [?g_hookedConcatFin@@3HA],1
+            01 00 00 00
+  0000025B: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000260: 83 C4 0C           add         esp,0Ch
+  00000263: EB 2A              jmp         0000028F
+  00000265: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  00000269: 50                 push        eax
+  0000026A: 0F B6 46 03        movzx       eax,byte ptr [esi+3]
+  0000026E: 50                 push        eax
+  0000026F: 0F B6 46 02        movzx       eax,byte ptr [esi+2]
+  00000273: 50                 push        eax
+  00000274: 0F B6 46 01        movzx       eax,byte ptr [esi+1]
+  00000278: 50                 push        eax
+  00000279: 0F B6 06           movzx       eax,byte ptr [esi]
+  0000027C: 50                 push        eax
+  0000027D: 68 9A ED 08 00     push        8ED9Ah
+  00000282: 68 00 00 00 00     push        offset ??_C@_0EA@MEDJPBJA@?$FLCJK?$FN?5?$CB?$CB?50x?$CFX?5?W?V?$LN?Z?$LC?$LL?$LH?$PL?$KD?$KI?$CF02X?5?$CF0@
+  00000287: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  0000028C: 83 C4 1C           add         esp,1Ch
+  0000028F: 8B 35 00 00 00 00  mov         esi,dword ptr [?g_gwBase@@3KA]
+  00000295: B9 00 00 00 00     mov         ecx,offset ?expect5@?BL@??install_hook@@YAHXZ@4QBEB
+  0000029A: 81 C6 59 9B 0F 00  add         esi,0F9B59h
+  000002A0: 8B 06              mov         eax,dword ptr [esi]
+  000002A2: 3B 01              cmp         eax,dword ptr [ecx]
+  000002A4: 75 71              jne         00000317
+  000002A6: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  000002AA: 3A 41 04           cmp         al,byte ptr [ecx+4]
+  000002AD: 75 68              jne         00000317
+  000002AF: 8B 06              mov         eax,dword ptr [esi]
+  000002B1: A3 00 00 00 00     mov         dword ptr [?g_origDrawLen@@3PAEA],eax
+  000002B6: 8A 46 04           mov         al,byte ptr [esi+4]
+  000002B9: A2 04 00 00 00     mov         byte ptr [?g_origDrawLen@@3PAEA+4],al
+  000002BE: 8D 44 24 10        lea         eax,[esp+10h]
+  000002C2: 50                 push        eax
+  000002C3: 6A 40              push        40h
+  000002C5: 6A 05              push        5
+  000002C7: 56                 push        esi
+  000002C8: FF D7              call        edi
+  000002CA: 85 C0              test        eax,eax
+  000002CC: 74 73              je          00000341
+  000002CE: B8 00 00 00 00     mov         eax,offset ?cjk_draw_len_trampoline_impl@@YAXXZ
+  000002D3: C6 06 E9           mov         byte ptr [esi],0E9h
+  000002D6: 2B C6              sub         eax,esi
+  000002D8: 83 E8 05           sub         eax,5
+  000002DB: 89 46 01           mov         dword ptr [esi+1],eax
+  000002DE: 8D 44 24 10        lea         eax,[esp+10h]
+  000002E2: 50                 push        eax
+  000002E3: FF 74 24 14        push        dword ptr [esp+14h]
+  000002E7: 6A 05              push        5
+  000002E9: 56                 push        esi
+  000002EA: FF D7              call        edi
+  000002EC: 6A 05              push        5
+  000002EE: 56                 push        esi
+  000002EF: FF D3              call        ebx
+  000002F1: 50                 push        eax
+  000002F2: FF D5              call        ebp
+  000002F4: 68 00 00 00 00     push        offset ?cjk_draw_len_trampoline_impl@@YAXXZ
+  000002F9: 68 59 9B 0F 00     push        0F9B59h
+  000002FE: 68 00 00 00 00     push        offset ??_C@_0CI@BGIDNGIP@?$FLCJK?$FN?5v16f?5?$LL?f?V?F?$LD?$KE?$LG?H?5hook?3?50x?$CFX?5@
+  00000303: C7 05 00 00 00 00  mov         dword ptr [?g_hookedDrawLen@@3HA],1
+            01 00 00 00
+  0000030D: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000312: 83 C4 0C           add         esp,0Ch
+  00000315: EB 2A              jmp         00000341
+  00000317: 0F B6 46 04        movzx       eax,byte ptr [esi+4]
+  0000031B: 50                 push        eax
+  0000031C: 0F B6 46 03        movzx       eax,byte ptr [esi+3]
+  00000320: 50                 push        eax
+  00000321: 0F B6 46 02        movzx       eax,byte ptr [esi+2]
+  00000325: 50                 push        eax
+  00000326: 0F B6 46 01        movzx       eax,byte ptr [esi+1]
+  0000032A: 50                 push        eax
+  0000032B: 0F B6 06           movzx       eax,byte ptr [esi]
+  0000032E: 50                 push        eax
+  0000032F: 68 59 9B 0F 00     push        0F9B59h
+  00000334: 68 00 00 00 00     push        offset ??_C@_0EA@MFPLJLKH@?$FLCJK?$FN?5?$CB?$CB?50x?$CFX?5?W?V?$LN?Z?$LC?$LL?$LH?$PL?$KD?$KI?$CF02X?5?$CF0@
+  00000339: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  0000033E: 83 C4 1C           add         esp,1Ch
+  00000341: FF 35 00 00 00 00  push        dword ptr [?g_hookedDrawLen@@3HA]
+  00000347: FF 35 00 00 00 00  push        dword ptr [?g_hookedConcatFin@@3HA]
+  0000034D: FF 35 00 00 00 00  push        dword ptr [?g_hookedConcatLen@@3HA]
+  00000353: FF 35 00 00 00 00  push        dword ptr [?g_hookedTfstr@@3HA]
+  00000359: FF 35 00 00 00 00  push        dword ptr [?g_gwBase@@3KA]
+  0000035F: 68 00 00 00 00     push        offset ?cjk_trampoline_impl@@YAXXZ
+  00000364: 68 B2 0F 02 00     push        20FB2h
+  00000369: 68 00 00 00 00     push        offset ??_C@_0GE@HNLJENPI@?$FLCJK?$FN?5EnclaveCJK?5v16f?5Hook?5?$LA?$LC?W?$LA@
+  0000036E: E8 00 00 00 00     call        ?log_msg@@YAXPBDZZ
+  00000373: 83 C4 20           add         esp,20h
+  00000376: 5F                 pop         edi
+  00000377: 5E                 pop         esi
+  00000378: 5D                 pop         ebp
+  00000379: 33 C0              xor         eax,eax
+  0000037B: 5B                 pop         ebx
+  0000037C: 59                 pop         ecx
+  0000037D: C2 04 00           ret         4
+
+_DllMain@12:
+  00000000: 83 7C 24 08 01     cmp         dword ptr [esp+8],1
+  00000005: 75 2A              jne         00000031
+  00000007: FF 74 24 04        push        dword ptr [esp+4]
+  0000000B: FF 15 00 00 00 00  call        dword ptr [__imp__DisableThreadLibraryCalls@4]
+  00000011: 6A 00              push        0
+  00000013: 6A 00              push        0
+  00000015: 6A 00              push        0
+  00000017: 68 00 00 00 00     push        offset ?wait_thread@@YGKPAX@Z
+  0000001C: 6A 00              push        0
+  0000001E: 6A 00              push        0
+  00000020: FF 15 00 00 00 00  call        dword ptr [__imp__CreateThread@24]
+  00000026: 85 C0              test        eax,eax
+  00000028: 74 07              je          00000031
+  0000002A: 50                 push        eax
+  0000002B: FF 15 00 00 00 00  call        dword ptr [__imp__CloseHandle@4]
+  00000031: B8 01 00 00 00     mov         eax,1
+  00000036: C2 0C 00           ret         0Ch
+
+_NtCurrentTeb:
+  00000000: 64 A1 18 00 00 00  mov         eax,dword ptr fs:[00000018h]
+  00000006: C3                 ret
+
+  Summary
+
+         150 .bss
+         2D0 .chks64
+         120 .debug$F
+          88 .debug$S
+          2F .drectve
+         36C .rdata
+           4 .sxdata
+        1B3E .text$mn
+           2 .voltbl
+          7C .xdata$x
