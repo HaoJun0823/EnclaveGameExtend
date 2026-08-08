@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v18b"
+#define CJK_VERSION "v18c"
 
 #include "pch.h"
 
@@ -1724,10 +1724,13 @@ static volatile LONG s_substCount = 0;
 
 // v18 handler：进入时栈 [src, 0x01, len]，ecx=目标(窄指针)，edx=1
 // （jmp 替换 call，无返回地址；栈上 3 参数由本 handler 清理）
-// ★ v18b 关键修正：调用者原逻辑推进 = 2*len（lea eax,[edi+edi]; add ebp,eax），
-//   与 0x44EA 实际写入数无关！v18a 用「实际字符数 N」推进 → 目标指针错位
-//   → 主循环后续文本段全部错位 → 【所有文字乱码】。v18b 推进 = 2*len 保持一致，
-//   并写满 len 个宽字符（转换字符 + 全角空格填充），杜绝缓冲空洞。
+// ★ v18c 关键修正：0x10ABEA 不只是键名通道——【所有 §L 宏展开值】都经过它，
+//   包括宽中文文本（难度名「简单」= 0x7B80 等）！v18b 用 [esi+1]==0 判宽窄，
+//   对汉字宽串失效（高字节非 0 且常落在 ASCII 区）→ 宽文本被逐字节全角化 → 乱码。
+//   v18c 改用【长度可信度判别】：扫描源到第一个 0x00 得字节长 L；
+//   宽串 v14（sub_1000502A 计算）≈ L/2 → v14*2 <= L → 宽；窄串 v14 越界（'SPACE 7B→v14=11）
+//   → v14*2 > L → 窄。宽源逐宽字符（ASCII 全角化/汉字原样），窄源逐字节全角化。
+//   推进量 = 2*len（与调用者 lea eax,[edi+edi]; add ebp,eax 一致）→ 主循环不错位。
 static void __declspec(naked) cjk_subst_key_impl(void)
 {
     __asm
@@ -1739,38 +1742,25 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         ; 栈参数（pushad 前）：[0x20]=src [0x24]=0x01(源宽标志) [0x28]=len(v14)
         mov  esi, [esp + 0x20]          ; esi = 源
         mov  edi, [esp + 0x18]          ; edi = 原 ecx = 目标指针
-        mov  ebx, [esp + 0x28]          ; ebx = len(v14)：推进量与写满数
-        ; 判源宽窄：宽串 ASCII 高字节为 0（[esi+1]==0）
-        movzx eax, byte ptr [esi + 1]
-        test eax, eax
-        jnz  src_narrow
-        ; ── 宽源路径：逐宽字符（ASCII 全角化，汉字原样）──
-        xor  edx, edx                   ; 源偏移（宽字符）
-    wide_loop:
-        test ebx, ebx                   ; 剩余目标数
+        mov  ebx, [esp + 0x28]          ; ebx = len(v14)
+        test ebx, ebx
         jz   subst_finish
-        movzx eax, word ptr [esi + edx*2]
-        test eax, eax
-        jz   wide_fill                  ; 源 NUL → 空格填充
-        cmp  eax, 0x20
-        jb   wide_raw
-        cmp  eax, 0x7E
-        ja   wide_raw
-        add  eax, 0xFEE0                ; 半角 0x20-0x7E → 全角（0xFF00-0xFF5E）
-    wide_raw:
-        mov  [edi], ax
-        add  edi, 2
-        inc  edx
-        dec  ebx
-        jmp  wide_loop
-    wide_fill:
-        mov  word ptr [edi], 0x3000     ; 全角空格填充
-        add  edi, 2
-        dec  ebx
-        jnz  wide_fill
-        jmp  subst_finish
-        ; ── 窄源路径：逐字节（全部 ASCII → 全角化）──
-    src_narrow:
+        ; ── 判别：扫描源到第一个 0x00 → eax = L_actual（上限 128）──
+        xor  eax, eax
+    scan_len:
+        cmp  eax, 128
+        jae  scan_done
+        cmp  byte ptr [esi + eax], 0
+        je   scan_done
+        inc  eax
+        jmp  scan_len
+    scan_done:
+        ; v14*2 <= L_actual → 宽源（v14 可信）；否则窄源（v14 越界）
+        mov  ecx, ebx
+        shl  ecx, 1
+        cmp  ecx, eax
+        jbe  src_wide
+        ; ── 窄源路径：逐字节全角化，写满 v14 个 ──
         xor  edx, edx                   ; 源偏移（字节）
     narrow_loop:
         test ebx, ebx
@@ -1782,7 +1772,7 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         jb   narrow_raw
         cmp  eax, 0x7E
         ja   narrow_raw
-        add  eax, 0xFEE0
+        add  eax, 0xFEE0                ; 半角 → 全角
     narrow_raw:
         mov  [edi], ax
         add  edi, 2
@@ -1794,17 +1784,42 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         add  edi, 2
         dec  ebx
         jnz  narrow_fill
+        jmp  subst_finish
+        ; ── 宽源路径：逐宽字符（ASCII 全角化，汉字原样），写满 v14 个 ──
+    src_wide:
+        xor  edx, edx                   ; 源偏移（宽字符）
+    wide_loop:
+        test ebx, ebx
+        jz   subst_finish
+        movzx eax, word ptr [esi + edx*2]
+        test eax, eax
+        jz   wide_fill
+        cmp  eax, 0x20
+        jb   wide_raw
+        cmp  eax, 0x7E
+        ja   wide_raw
+        add  eax, 0xFEE0                ; 半角 ASCII → 全角
+    wide_raw:
+        mov  [edi], ax
+        add  edi, 2
+        inc  edx
+        dec  ebx
+        jmp  wide_loop
+    wide_fill:
+        mov  word ptr [edi], 0x3000
+        add  edi, 2
+        dec  ebx
+        jnz  wide_fill
     subst_finish:
-        ; ★ v18b：ebp/esi 推进 = 2*len（与原逻辑 lea eax,[edi+edi]; add ebp,eax 完全一致）
-        ;   → 主循环目标指针不错位 → 后续文本段正常！
+        ; 推进 = 2*len（与原逻辑 lea eax,[edi+edi]; add ebp,eax 一致）
         mov  eax, [esp + 0x28]          ; len(v14)
-        shl  eax, 1                     ; 2*len
+        shl  eax, 1
         add  [esp + 0x08], eax          ; 保存的 EBP += 2*len
         add  [esp + 0x04], eax          ; 保存的 ESI += 2*len
         popad
         add  esp, 0x0C                  ; 清 3 个参数（src/0x01/len）
         xor  eax, eax                   ; ax=0 → 0x10ABF9 test ax,ax 命中 jz → 内层循环退出
-        jmp  dword ptr [g_substBackVA]  ; 回 0x10ABF9（test ax,ax，跳过 0x10ABF6 mov ax,[esi] 读垃圾）
+        jmp  dword ptr [g_substBackVA]  ; 回 0x10ABF9
     }
 }
 
