@@ -2932,14 +2932,18 @@ static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr)
     {
         if (textPtr < 0x10000 || textPtr > 0x7FFEFFFF) return;
         WORD* w = (WORD*)textPtr;
-        int n = 0, hasSL = 0, i;
-        // 求长度 + 检测 §L（A7 00 4C 00）
+        int n = 0, hasSL = 0, hasCjk = 0, i;
+        // 求长度 + 检测 §L（A7 00 4C 00）+ 统计 CJK/全角（§L 汉化文本必有中文正文，
+        // 全 ASCII 的引擎内部缓冲【绝不改写】——防误判 A7 4C 误写坏内存）
         while (n < 252 && w[n])
         {
-            if (!hasSL && n + 1 < 252 && w[n] == 0x00A7 && w[n + 1] == 0x004C) hasSL = 1;
+            WORD c = w[n];
+            if (!hasSL && n + 1 < 252 && c == 0x00A7 && w[n + 1] == 0x004C) hasSL = 1;
+            if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3000 && c <= 0x303F) ||
+                (c >= 0xFF00 && c <= 0xFFEF)) hasCjk = 1;
             n++;
         }
-        if (!hasSL || n < 4) return;
+        if (!hasSL || !hasCjk || n < 4) return;
         WORD ebuf[260];
         int en = tfstr_expand_keys(w, n, ebuf, 256);
         if (en <= 0 || en >= n) return;          // 只缩短才改写（绝不扩展越界）
@@ -2962,10 +2966,12 @@ static void __declspec(naked) cjk_subst_entry_impl(void)
 {
     __asm
     {
-        ; 进入：[esp]=ret, [esp+0x10]=输入文本指针（hook 替换头 6B）
-        ; pushad 后：文本指针 = [esp+0x20+0x10] = [esp+0x30]
+        ; 进入：[esp]=ret, [esp+4]=文本指针（SubstituteKeys 第一参数——反汇编实证：
+        ;   0x1010AA2E mov eax,[esp+0x10] 是在 push -1/push handler/push eax(旧fs) 三个
+        ;   SEH 头【之后】，即 = 原始 [esp+4]。★ v23q.2 修正：之前误取 [esp+0x10]（a4）。
+        ; pushad 后：文本指针 = [esp+0x20+4] = [esp+0x24]
         pushad
-        mov  eax, [esp + 0x30]
+        mov  eax, [esp + 0x24]
         test eax, eax
         jz   se_done
         push eax
