@@ -2160,6 +2160,17 @@ static int install_probe_hook(void)
 #define IAT_GW_READFILE_RVA     0x13E07Cu // GameWorld KERNEL32.ReadFile IAT 槽
 #define IAT_MS_CREATEFILEA_RVA  0x11C0A8u // MSystem KERNEL32.CreateFileA IAT 槽（CDiskUtil 文件核心）
 #define IAT_MS_READFILE_RVA     0x11C084u // MSystem KERNEL32.ReadFile IAT 槽
+// ★ v23i：EXE → MCCDyn.CCFile 的 IAT 槽（IDA 逆向 MCCDyn.dll 实证）——
+//   教程 .xrg 由 CCFile::Open(VCStr) + Readln() 逐行读取，底层 CByteStream/CStream_XDF
+//   自研虚拟文件系统完全绕过 CreateFileA（v23d/e/f 全 0 条的真因）。
+//   这两个槽是 EXE 侧教程加载的【必经入口】，hook 它们必能抓到文件名+行内容。
+#define IAT_EXE_MCC_OPEN_RVA   0x77268u // Enclave.exe MCCDyn.CCFile::Open(VCStr,int,ECompressTypes,ESettings) IAT 槽
+#define IAT_EXE_MCC_READLN_RVA 0x77270u // Enclave.exe MCCDyn.CCFile::Readln() IAT 槽
+static void* (__thiscall* g_origExeCcOpen)(void* self, void* vcstr, int a2, int a3, int a4);
+static void* (__thiscall* g_origExeCcReadln)(void* self, void* out);
+static volatile LONG g_inCcProbe = 0;
+static DWORD g_tmpCcCaller = 0;   // naked 中转存
+static void* g_tmpCcOut = NULL;   // naked 中转存
 static BOOL   (WINAPI* g_origExeReadFile)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 static BOOL   (WINAPI* g_origGwReadFile)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 static HANDLE(WINAPI* g_origGwCreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
@@ -2183,6 +2194,73 @@ static void file_probe_log(const char* name, DWORD caller)
     SetFilePointer(h, 0, NULL, FILE_END);
     DWORD written;
     WriteFile(h, buf, lstrlenA(buf), &written, NULL);
+    CloseHandle(h);
+}
+
+// ★ v23i：CCFile::Open(VCStr) 文件名 log（教程 .xrg 加载必经）
+static void cc_open_log(const char* file, DWORD caller)
+{
+    char buf[320];
+    static DWORD s_cnt = 0;
+    if (!file) return;
+    if (s_cnt >= 200) return;
+    // 只记 xrg/对话/教程相关（过滤音效贴图等噪声）
+    if (!(strstr(file, ".xrg") || strstr(file, ".XRG") ||
+          strstr(file, "LM0") || strstr(file, "DM0") ||
+          strstr(file, "Dialogues") || strstr(file, "DIALOGUES") ||
+          strstr(file, "dialogue"))) return;
+    s_cnt++;
+    wsprintfA(buf, "[CC_OPEN %04d] caller=%08X file=%s\n", s_cnt, caller, file);
+    HANDLE h = CreateFileA("CJK_cc_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    SetFilePointer(h, 0, NULL, FILE_END);
+    DWORD written;
+    WriteFile(h, buf, lstrlenA(buf), &written, NULL);
+    CloseHandle(h);
+}
+
+// ★ v23i：CCFile::Readln() 返回行内容 log（out = CStr* {vtable@+0, char* p@+4}）
+//   p 指向行文本（宽路径=UTF-16LE，窄路径=ASCII）。按 WORD 解码输出，宽窄通吃。
+static void cc_readln_log(DWORD caller, void* out)
+{
+    char buf[900];
+    char* p = buf;
+    const char* txt;
+    static DWORD s_cnt = 0;
+    int i;
+    if (s_cnt >= 400) return;
+    __try
+    {
+        if (!out) return;
+        txt = *(const char**)((char*)out + 4);  // CStr.p @ +4
+        if (!txt) return;
+        for (i = 0; i < 48; i++)                // 预扫描：确认可读
+        {
+            if (*(WORD*)(txt + i * 2) == 0) break;
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+    s_cnt++;
+    p += wsprintfA(p, "[READLN %04d] caller=%08X ", s_cnt, caller);
+    for (i = 0; i < 48; i++)
+    {
+        WORD w;
+        __try { w = *(WORD*)(txt + i * 2); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { break; }
+        if (w == 0) break;
+        if (w >= 0x20 && w <= 0x7E) p += wsprintfA(p, "%c", (char)w);
+        else if ((w >= 0x4E00 && w <= 0x9FFF) || (w >= 0x3000 && w <= 0x30FF))
+            p += wsprintfA(p, "[%04X]", w);
+        else p += wsprintfA(p, "<%02X%02X>", w & 0xFF, w >> 8);
+    }
+    p += wsprintfA(p, "\n");
+    HANDLE h = CreateFileA("CJK_cc_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    SetFilePointer(h, 0, NULL, FILE_END);
+    DWORD written;
+    WriteFile(h, buf, (DWORD)(p - buf), &written, NULL);
     CloseHandle(h);
 }
 
@@ -2217,6 +2295,67 @@ static BOOL WINAPI my_ExeReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOf
                                   LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped)
 {
     return g_origExeReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
+}
+
+// ★ v23i：MCCDyn.CCFile::Open(VCStr,int,ECompressTypes,ESettings) IAT hook
+//   进入（EXE call [IAT]）：[esp]=EXE caller, [esp+4]=VCStr(8B: p,len),
+//                          [esp+0xC]=int, [esp+0x10]=ECompressTypes, [esp+0x14]=ESettings, ecx=this
+//   naked 完美转发：log 文件名 + caller → popad → jmp 原函数（栈原样）
+static void __declspec(naked) my_ExeCcOpen(void)
+{
+    __asm
+    {
+        pushad
+        ; pushad 布局: [0x00]EDI [0x04]ESI [0x08]EBP [0x0C]ESP [0x10]EBX [0x14]EDX [0x18]ECX [0x1C]EAX
+        ; [esp+0x20]=原[esp]=caller, [esp+0x24]=VCStr.p
+        cmp  byte ptr [g_inCcProbe], 1
+        je   co_skip
+        mov  byte ptr [g_inCcProbe], 1
+        mov  eax, [esp + 0x24]          ; VCStr.p（文件名）
+        mov  ebx, [esp + 0x20]          ; caller
+        test eax, eax
+        jz   co_done
+        push eax                        ; 参数2: file
+        push ebx                        ; 参数1: caller
+        call cc_open_log
+        add  esp, 8
+    co_done:
+        mov  byte ptr [g_inCcProbe], 0
+    co_skip:
+        popad
+        jmp  dword ptr [g_origExeCcOpen]
+    }
+}
+
+// ★ v23i：MCCDyn.CCFile::Readln() IAT hook —— 调用后处理模式
+//   进入：[esp]=EXE caller, [esp+4]=out(sret CStr*), ecx=this
+//   流程：保存 caller/out → call 原函数（原函数填 out）→ log out 行内容 → ret 4 回 EXE
+static void __declspec(naked) my_ExeCcReadln(void)
+{
+    __asm
+    {
+        cmp  byte ptr [g_inCcProbe], 1
+        je   rl_noop
+        mov  byte ptr [g_inCcProbe], 1
+        mov  eax, [esp]                 ; caller
+        mov  edx, [esp + 4]             ; out
+        mov  [g_tmpCcCaller], eax
+        mov  [g_tmpCcOut], edx
+        ; 调原函数（thiscall：ecx=this 保持，[esp+4]=out 保持）
+        ; call 压返回地址 → 原函数入口 [esp]=my_ret, [esp+4]=out ✓
+        call dword ptr [g_origExeCcReadln]
+        ; ★ 原函数 ret 4：弹 my_ret + 清 out → 回到这里时 [esp]=EXE_ret
+        pushad
+        push [g_tmpCcOut]               ; 参数2: out
+        push [g_tmpCcCaller]            ; 参数1: caller
+        call cc_readln_log
+        add  esp, 8
+        popad
+        mov  byte ptr [g_inCcProbe], 0
+        ret                             ; 只弹 EXE_ret（out 已由原函数 ret 4 清理）
+    rl_noop:
+        jmp  dword ptr [g_origExeCcReadln]
+    }
 }
 
 // ★ v23e：GameWorld 的 CreateFileA 也探（DIALOGUES 加载器 sub_1008D500 打开 LM01.xrg 走这里）
@@ -2330,6 +2469,64 @@ static int install_exe_file_probe_hook(void)
         log_msg("[CJK] v23g EXE ReadFile IAT hook：%08X -> %08X\n", (DWORD)slot, (DWORD)my_ExeReadFile);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+    // ★ v23i：EXE → MCCDyn.CCFile::Open / Readln IAT 槽（教程 .xrg 加载必经入口）
+    //   IDA 逆向 MCCDyn.dll 实证：CCFile::Open(VCStr)=0x100233C0, Readln=0x100223F0,
+    //   CStr 结构={vtable@+0, p@+4}；底层 CByteStream/CStream_XDF 自研虚拟文件系统
+    //   完全绕过 CreateFileA（v23d/e/f 全 0 条的真因）。
+    {
+        HMODULE hCc = GetModuleHandleA("MCCdyn.dll");
+        if (hCc)
+        {
+            // CCFile::Open(VCStr,int,ECompressTypes,ESettings)
+            slot = (DWORD*)(g_exeBase + IAT_EXE_MCC_OPEN_RVA);
+            __try
+            {
+                cur = *slot;
+                FARPROC pOpen = GetProcAddress(hCc,
+                    "?Open@CCFile@@QAEXVCStr@@HW4ECompressTypes@@W4ESettings@@@Z");
+                if (cur != (DWORD)pOpen)
+                {
+                    log_msg("[CJK] v23i EXE CCFile::Open 槽校验失败：%08X != %08X，跳过\n",
+                            cur, (DWORD)pOpen);
+                    return 0;
+                }
+                g_origExeCcOpen = (void* (__thiscall*)(void*, void*, int, int, int))cur;
+                VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
+                *slot = (DWORD)my_ExeCcOpen;
+                VirtualProtect(slot, 4, oldProt, &oldProt);
+                log_msg("[CJK] v23i EXE CCFile::Open IAT hook：%08X -> %08X（CJK_cc_log.txt）\n",
+                        (DWORD)slot, (DWORD)my_ExeCcOpen);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+            // CCFile::Readln() → 返回 CStr
+            slot = (DWORD*)(g_exeBase + IAT_EXE_MCC_READLN_RVA);
+            __try
+            {
+                cur = *slot;
+                FARPROC pRln = GetProcAddress(hCc,
+                    "?Readln@CCFile@@QAE?AVCStr@@XZ");
+                if (cur != (DWORD)pRln)
+                {
+                    log_msg("[CJK] v23i EXE CCFile::Readln 槽校验失败：%08X != %08X，跳过\n",
+                            cur, (DWORD)pRln);
+                    return 0;
+                }
+                g_origExeCcReadln = (void* (__thiscall*)(void*, void*))cur;
+                VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
+                *slot = (DWORD)my_ExeCcReadln;
+                VirtualProtect(slot, 4, oldProt, &oldProt);
+                log_msg("[CJK] v23i EXE CCFile::Readln IAT hook：%08X -> %08X\n",
+                        (DWORD)slot, (DWORD)my_ExeCcReadln);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+        }
+        else
+        {
+            log_msg("[CJK] v23i MCCdyn.dll 未加载，CCFile hook 跳过\n");
+        }
+    }
 
     return 1;
 }
