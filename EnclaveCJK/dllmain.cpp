@@ -2158,19 +2158,25 @@ static int install_probe_hook(void)
 #define IAT_EXE_READFILE_RVA    0x770B4u  // Enclave.exe KERNEL32.ReadFile IAT 槽
 #define IAT_GW_CREATEFILEA_RVA  0x13E0A8u // GameWorld KERNEL32.CreateFileA IAT 槽（DIALOGUES 加载器用）
 #define IAT_GW_READFILE_RVA     0x13E07Cu // GameWorld KERNEL32.ReadFile IAT 槽
+#define IAT_MS_CREATEFILEA_RVA  0x11C0A8u // MSystem KERNEL32.CreateFileA IAT 槽（CDiskUtil 文件核心）
+#define IAT_MS_READFILE_RVA     0x11C084u // MSystem KERNEL32.ReadFile IAT 槽
 static BOOL   (WINAPI* g_origExeReadFile)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 static BOOL   (WINAPI* g_origGwReadFile)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 static HANDLE(WINAPI* g_origGwCreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+static HANDLE(WINAPI* g_origMsCreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+static BOOL   (WINAPI* g_origMsReadFile)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 static volatile LONG g_inFileProbe = 0;
 
 static void file_probe_log(const char* name, DWORD caller)
 {
     char buf[300];
+    static DWORD s_count = 0;
     if (!name) return;
-    // 只记录 xrg 相关文件（教程/对话）
-    if (!(strstr(name, ".xrg") || strstr(name, ".XRG") ||
-          strstr(name, "LM0") || strstr(name, "DM0"))) return;
-    wsprintfA(buf, "[FILE] caller=%08X name=%s\n", caller, name);
+    // ★ v23f：v23d/v23e 过滤 .xrg 后 0 条 → LM01.xrg 不走 CreateFileA 或文件名不同。
+    //   改为记录【前 400 条全部文件打开】+ caller，看启动时真实文件访问序列。
+    if (s_count >= 400) return;
+    s_count++;
+    wsprintfA(buf, "[%04d] caller=%08X name=%s\n", s_count, caller, name);
     HANDLE h = CreateFileA("CJK_file_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
                            NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return;
@@ -2235,10 +2241,38 @@ static void __declspec(naked) my_GwCreateFileA(void)
     }
 }
 
+// ★ v23f：MSystem 的 CreateFileA（CDiskUtil 文件核心）
+static void __declspec(naked) my_MsCreateFileA(void)
+{
+    __asm
+    {
+        pushad
+        cmp  byte ptr [g_inFileProbe], 1
+        je   mf_skip
+        mov  byte ptr [g_inFileProbe], 1
+        mov  eax, [esp + 0x24]          ; lpFileName
+        mov  ebx, [esp + 0x20]          ; caller
+        push eax
+        push ebx
+        call file_probe_log
+        add  esp, 8
+        mov  byte ptr [g_inFileProbe], 0
+    mf_skip:
+        popad
+        jmp  dword ptr [g_origMsCreateFileA]
+    }
+}
+
 static BOOL WINAPI my_GwReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead,
                                  LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped)
 {
     return g_origGwReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
+}
+
+static BOOL WINAPI my_MsReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead,
+                                 LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped)
+{
+    return g_origMsReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
 }
 
 // 安装：校验 IAT 槽现值 = kernel32 导出地址后替换
@@ -2332,6 +2366,55 @@ static int install_file_probe_hook(void)
                     (DWORD)slot, (DWORD)my_GwReadFile);
         }
         __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+    }
+
+    // ★ v23f：MSystem CreateFileA/ReadFile（CDiskUtil::FileExists 文件核心）
+    {
+        HMODULE hMs = GetModuleHandleA("MSystem.dll");
+        if (hMs)
+        {
+            slot = (DWORD*)((DWORD)hMs + IAT_MS_CREATEFILEA_RVA);
+            __try
+            {
+                cur = *slot;
+                if (cur != (DWORD)GetProcAddress(hK32, "CreateFileA"))
+                {
+                    log_msg("[CJK] v23f MS CreateFileA 槽校验失败：%08X != %08X，跳过\n",
+                            cur, (DWORD)GetProcAddress(hK32, "CreateFileA"));
+                    return 0;
+                }
+                g_origMsCreateFileA = (HANDLE(WINAPI*)(LPCSTR,DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,DWORD,HANDLE))cur;
+                VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
+                *slot = (DWORD)my_MsCreateFileA;
+                VirtualProtect(slot, 4, oldProt, &oldProt);
+                log_msg("[CJK] v23f MS CreateFileA IAT hook：%08X -> %08X\n",
+                        (DWORD)slot, (DWORD)my_MsCreateFileA);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+            slot = (DWORD*)((DWORD)hMs + IAT_MS_READFILE_RVA);
+            __try
+            {
+                cur = *slot;
+                if (cur != (DWORD)GetProcAddress(hK32, "ReadFile"))
+                {
+                    log_msg("[CJK] v23f MS ReadFile 槽校验失败：%08X != %08X，跳过\n",
+                            cur, (DWORD)GetProcAddress(hK32, "ReadFile"));
+                    return 0;
+                }
+                g_origMsReadFile = (BOOL(WINAPI*)(HANDLE,LPVOID,DWORD,LPDWORD,LPOVERLAPPED))cur;
+                VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
+                *slot = (DWORD)my_MsReadFile;
+                VirtualProtect(slot, 4, oldProt, &oldProt);
+                log_msg("[CJK] v23f MS ReadFile IAT hook：%08X -> %08X\n",
+                        (DWORD)slot, (DWORD)my_MsReadFile);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+        }
+        else
+        {
+            log_msg("[CJK] v23f MSystem 未加载，文件探针跳过 MSystem 槽\n");
+        }
     }
 
     return 1;
