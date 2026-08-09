@@ -2198,17 +2198,22 @@ static void file_probe_log(const char* name, DWORD caller)
 }
 
 // ★ v23i：CCFile::Open(VCStr) 文件名 log（教程 .xrg 加载必经）
+//   v23k：加 SEH 保护（CCFile::Open 可能被非文本用途调用，VCStr.p 可能是坏指针）
 static void cc_open_log(const char* file, DWORD caller)
 {
     char buf[320];
     static DWORD s_cnt = 0;
     if (!file) return;
     if (s_cnt >= 200) return;
-    // 只记 xrg/对话/教程相关（过滤音效贴图等噪声）
-    if (!(strstr(file, ".xrg") || strstr(file, ".XRG") ||
-          strstr(file, "LM0") || strstr(file, "DM0") ||
-          strstr(file, "Dialogues") || strstr(file, "DIALOGUES") ||
-          strstr(file, "dialogue"))) return;
+    __try
+    {
+        // 只记 xrg/对话/教程相关（过滤音效贴图等噪声）
+        if (!(strstr(file, ".xrg") || strstr(file, ".XRG") ||
+              strstr(file, "LM0") || strstr(file, "DM0") ||
+              strstr(file, "Dialogues") || strstr(file, "DIALOGUES") ||
+              strstr(file, "dialogue"))) return;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return; }
     s_cnt++;
     wsprintfA(buf, "[CC_OPEN %04d] caller=%08X file=%s\n", s_cnt, caller, file);
     HANDLE h = CreateFileA("CJK_cc_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
@@ -2368,11 +2373,16 @@ static void __declspec(naked) my_ExeCcReadln(void)
 //   trampoline 复制 6B + E9 jmp → 0x233C6（push 0FFFFFFFFh，完整指令）
 // ═══════════════════════════════════════════════════════════════════════
 #define MCC_CCFILE_OPEN_RVA 0x233C0u   // MCCDyn CCFile::Open(VCStr,int,ECompressTypes,ESettings)
-static BYTE  g_openTramp[16];
+// ★ v23k：必须用 BYTE* + VirtualAlloc(PAGE_EXECUTE_READWRITE)！
+//   v23j 用 BYTE[16] 数组 → `jmp dword ptr [g_openTramp]` 读数组前 4 字节
+//   （=原函数头 64 A1 00 00 = 0x0000A164）当地址跳转 → Eip=0xA164 崩溃（dump 实证）
+static BYTE*  g_openTramp = NULL;
 static volatile LONG g_inCcProbe2 = 0;
 
-// 进入：[esp]=caller, [esp+4]=VCStr(8B: p,len), [esp+0xC]=int, [esp+0x10]=ECompressTypes,
-//        [esp+0x14]=ESettings, ecx=this → naked 转发：log 文件名+caller → jmp trampoline
+// 进入：[esp]=caller, [esp+4]=VCStr(8B: vtable,p), [esp+0xC]=int, [esp+0x10]=ECompressTypes,
+//        [esp+0x14]=ESettings, ecx=this
+//   ★ VCStr 按值传 8B：低 4B=vtable@原[esp+4]，高 4B=p@原[esp+8]
+//   pushad 后：[esp+0x20]=原[esp]=caller, [esp+0x28]=原[esp+4]=vtable, [esp+0x2C]=原[esp+8]=p
 static void __declspec(naked) my_McCcOpen(void)
 {
     __asm
@@ -2381,7 +2391,7 @@ static void __declspec(naked) my_McCcOpen(void)
         cmp  byte ptr [g_inCcProbe2], 1
         je   mo_skip
         mov  byte ptr [g_inCcProbe2], 1
-        mov  eax, [esp + 0x24]          ; VCStr.p（文件名）
+        mov  eax, [esp + 0x2C]          ; VCStr.p（文件名）
         mov  ebx, [esp + 0x20]          ; caller
         test eax, eax
         jz   mo_done
@@ -2393,11 +2403,11 @@ static void __declspec(naked) my_McCcOpen(void)
         mov  byte ptr [g_inCcProbe2], 0
     mo_skip:
         popad
-        jmp  dword ptr [g_openTramp]    ; 执行原头 6B + jmp 0x233C6
+        jmp  dword ptr [g_openTramp]    ; ★ 间接跳转到 trampoline（VirtualAlloc 可执行内存）
     }
 }
 
-// 安装：校验头部字节 → 建 trampoline → patch E9
+// 安装：校验头部字节 → VirtualAlloc 建 trampoline → patch E9
 static int install_ccfile_open_hook(void)
 {
     HMODULE hCc;
@@ -2412,11 +2422,17 @@ static int install_ccfile_open_hook(void)
         // 校验：64 A1 00 00 00 00 = mov eax, large fs:0
         if (target[0] != 0x64 || target[1] != 0xA1)
         {
-            log_msg("[CJK] v23j CCFile::Open 头校验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+            log_msg("[CJK] v23k CCFile::Open 头校验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
                     target[0], target[1], target[2], target[3], target[4], target[5]);
             return 0;
         }
-        // trampoline：复制 6B + E9 rel jmp (target+6)
+        if (!g_openTramp)
+        {
+            g_openTramp = (BYTE*)VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE,
+                                              PAGE_EXECUTE_READWRITE);
+            if (!g_openTramp) return 0;
+        }
+        // trampoline：复制 6B + E9 rel jmp (target+6)。E9 在 tramp[6]，下一条=tramp+11
         memcpy(g_openTramp, target, 6);
         g_openTramp[6] = 0xE9;
         *(DWORD*)(g_openTramp + 7) = ((DWORD)target + 6) - ((DWORD)g_openTramp + 11);
@@ -2425,7 +2441,8 @@ static int install_ccfile_open_hook(void)
         target[0] = 0xE9;
         *(DWORD*)(target + 1) = (DWORD)my_McCcOpen - ((DWORD)target + 5);
         VirtualProtect(target, 6, oldProt, &oldProt);
-        log_msg("[CJK] v23j MCCDyn CCFile::Open 本体 hook：%08X -> %08X（CJK_cc_log.txt）\n",
+        FlushInstructionCache(GetCurrentProcess(), target, 6);
+        log_msg("[CJK] v23k MCCDyn CCFile::Open 本体 hook：%08X -> %08X（CJK_cc_log.txt）\n",
                 (DWORD)target, (DWORD)my_McCcOpen);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
