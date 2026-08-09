@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q22"
+#define CJK_VERSION "v23q22.1"
 
 #include "pch.h"
 
@@ -4580,12 +4580,17 @@ static int     g_kvCnt = 0;
 static void kv_store(const WORD* key, int ki, const WORD* val, int vi)
 {
     if (ki <= 0 || ki >= 64 || vi <= 0 || vi >= 250 || g_kvCnt >= KV_MAX) return;
+    // ★ v23q22.1：key 是 WORD 数组（UTF-16，高字节 0）——必须逐字符取低字节转 ASCII！
+    //   之前 (LPCSTR)key 直接转 → 读到 'S'(0x53) 后遇 0x00 终止 → key 截断成 "S" →
+    //   kv_find("STORY_L_M1") 永远查不到 → H5 宏展开全部失效（v23q22 实测 0 命中）。
+    char asckey[64];
+    for (int i = 0; i < ki && i < 63; i++) asckey[i] = (char)(key[i] & 0xFF);
+    asckey[ki < 63 ? ki : 63] = 0;
     KVEntry* e = NULL;
     for (int i = 0; i < g_kvCnt; i++)
-        if (lstrcmpiA(g_kv[i].key, (LPCSTR)key) == 0 && g_kv[i].key[0]) { e = &g_kv[i]; break; }
+        if (g_kv[i].key[0] && lstrcmpiA(g_kv[i].key, asckey) == 0) { e = &g_kv[i]; break; }
     if (!e) { e = &g_kv[g_kvCnt++]; e->key[0] = 0; }
-    for (int i = 0; i < ki; i++) e->key[i] = (char)key[i];
-    e->key[ki] = 0;
+    lstrcpynA(e->key, asckey, sizeof(e->key));
     for (int i = 0; i < vi; i++) e->val[i] = val[i];
     e->vlen = vi;
 }
@@ -4734,8 +4739,8 @@ static void trie_load(void)
     VirtualFree(buf, 0, MEM_RELEASE);
     trie_load_xrg();                               // ★ v23q14：加载 .xrg *TEXT 到同一 Trie
     g_trieState = 2;
-    log_msg("[CJK] v23q13 Trie 字典加载：%u 节点（StringTable + %u 个 .xrg TEXT 文件区）\n",
-            g_trieCnt, rd);
+    log_msg("[CJK] v23q13 Trie 字典加载：%u 节点（StringTable + %u 个 .xrg TEXT 文件区）；KV 表 %d 条\n",
+            g_trieCnt, rd, g_kvCnt);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
