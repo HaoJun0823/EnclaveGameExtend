@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23o"
+#define CJK_VERSION "v23p"
 
 #include "pch.h"
 
@@ -850,6 +850,7 @@ static void* g_wideTramp = NULL;
 static DWORD g_msBase = 0;
 static BOOL  g_hookedWideBody = FALSE;
 static DWORD g_wideOrigRet = 0;   // ★ v16r：hook_impl 保存的原调用者返回地址
+static volatile LONG g_widePostBusy = 0;   // ★ v23p：post 重入锁（嵌套/多线程调用保护）
 
 static void __cdecl cjk_loc_wide_post_c(const WORD* a1, WORD* out, int cap)
 {
@@ -876,6 +877,9 @@ static void __declspec(naked) cjk_loc_wide_post(void)
         call cjk_loc_wide_post_c
         add  esp, 12
         popad
+        ; ★ v23p：先清重入锁再跳回（保证嵌套调用外层 post 也能正确取到自己的返回地址）
+        mov  eax, g_widePostBusy
+        mov  g_widePostBusy, 0
         jmp  dword ptr [g_wideOrigRet]           ; 回原调用者（栈上参数保留，调用者清栈）
     }
 }
@@ -886,6 +890,12 @@ static void __declspec(naked) cjk_loc_wide_hook_impl(void)
     __asm
     {
         ; 进入：栈 [ret, a1, out, cap]
+        ; ★ v23p：重入保护 —— 若已有 post 在途（嵌套/多线程调用 Localize_Str(wide)），
+        ;   不装 post、原样走原函数（返回地址不变），避免 g_wideOrigRet 被覆盖 → 外层
+        ;   post jmp 错地址崩溃。内层文本不处理后返回，代价极小（主菜单高频调用）。
+        cmp  dword ptr [g_widePostBusy], 0
+        jne  wh_reentrant
+        mov  dword ptr [g_widePostBusy], 1
         push ebp
         mov  ebp, esp
         push eax
@@ -896,6 +906,8 @@ static void __declspec(naked) cjk_loc_wide_hook_impl(void)
         pop  eax
         pop  ebp
         jmp  dword ptr [g_wideTramp]             ; 跳板：原 5 字节 + jmp 原函数+5
+    wh_reentrant:
+        jmp  dword ptr [g_wideTramp]             ; 重入：原样走原函数（不装 post）
     }
 }
 
@@ -952,6 +964,7 @@ static BYTE  g_origFindKeyBody[FINDKEY_HDR_BYTES];
 static void* g_findKeyTramp = NULL;
 static BOOL  g_hookedFindKey = FALSE;
 static DWORD g_keyCaller = 0;              // hook_impl 保存的原调用者返回地址
+static volatile LONG g_keyPostBusy = 0;    // ★ v23p：FindKeyValue post 重入锁（嵌套/多线程保护）
 
 // 大小写不敏感 ASCII 比较（免 string.h 依赖）。maxn 上限防 a2 非 0 结尾越界读。
 static int key_eq_n(const char* a, const char* b, int maxn)
@@ -1045,6 +1058,12 @@ static const WORD* key_map_lookup(const char* tok)
 
 // 在 UTF-16 文本 t 中替换键名：识别 [引号]字母数字串[引号]，命中映射则替换为汉字并剥离引号。
 // 变长处理：memmove 后续文本（含终止符）。边界：maxw WORD。
+// ★ v23p 崩溃修复（51872 dump 实证：dsound 音频线程 free/malloc 时 AV → 堆损坏延迟爆发）：
+//   v16x 只修了 strip 分支，**memmove 变长分支仍会越界写**：
+//     ① `while (t[total]) total++` 无上限扫描（缓冲区终止符缺失时扫出边界）
+//     ② `rlen > delta`（如 Q→切换武器键 5 WORD、1 字母变 5 汉字）时 memmove 右移
+//       超出缓冲实际容量 → 静默写坏堆/栈 → 数分钟后任意线程 free 时崩。
+//   ⇒ v23p：扫描限长 + **只允许等长/缩短替换（rlen <= delta）**，变长一律跳过（原样保留 token）。
 static void key_replace(WORD* t, int maxw)
 {
     int i = 0;
@@ -1068,20 +1087,27 @@ static void key_replace(WORD* t, int maxw)
             const WORD* repl = key_map_lookup(tok);
             if (repl)
             {
-                int rlen = 0, newstart, oldend, delta, total, k;
+                int rlen = 0, newstart, oldend, total, delta, k;
                 while (repl[rlen]) rlen++;
                 newstart = i - strip_lead;
                 oldend = j + strip_trail;
                 total = 0;
-                while (t[total]) total++;
+                while (total < maxw && t[total]) total++;    // ★ v23p：限长扫描（原无上限）
                 delta = oldend - newstart;
-                if (rlen != delta && oldend <= total)
+                // ★ v23p：只允许等长/缩短替换（memmove 左移，目标区在原文本内，绝不越界）。
+                //   变长（rlen > delta）会右移越过缓冲容量 → 越界写 → 跳过（原样保留）。
+                if (rlen < delta && oldend <= total)
                 {
                     memmove(t + newstart + rlen, t + oldend,
                             (total + 1 - oldend) * sizeof(WORD));
                 }
-                for (k = 0; k < rlen; k++) t[newstart + k] = repl[k];
-                i = newstart + rlen;
+                if (rlen <= delta && oldend <= total)
+                {
+                    for (k = 0; k < rlen; k++) t[newstart + k] = repl[k];
+                    i = newstart + rlen;
+                    continue;
+                }
+                i = j;                                      // 变长：放弃替换
                 continue;
             }
             // ★ v16x 修正（v16w 崩溃）：未命中映射但被引号包裹（= 键名，如 'MOUSEBUTTON1'）→
@@ -1210,6 +1236,9 @@ static void __declspec(naked) cjk_findkey_post(void)
         call cjk_findkey_post_c
         add  esp, 8
         popad
+        ; ★ v23p：先清重入锁再跳回
+        mov  eax, g_keyPostBusy
+        mov  g_keyPostBusy, 0
         jmp  dword ptr [g_keyCaller]             ; ★ v16r：jmp 回原调用者（参数留给调用者清）
     }
 }
@@ -1220,6 +1249,11 @@ static void __declspec(naked) cjk_findkey_hook_impl(void)
     __asm
     {
         ; 进入：栈 [ret_to_caller, a1, a2]
+        ; ★ v23p：重入保护（嵌套/多线程调用 FindKeyValue → g_keyCaller 被覆盖 →
+        ;   post jmp 错地址崩溃）。忙则原样走原函数。
+        cmp  dword ptr [g_keyPostBusy], 0
+        jne  fk_reentrant
+        mov  dword ptr [g_keyPostBusy], 1
         push ebp
         mov  ebp, esp
         push eax
@@ -1230,6 +1264,8 @@ static void __declspec(naked) cjk_findkey_hook_impl(void)
         pop  eax
         pop  ebp
         jmp  dword ptr [g_findKeyTramp]          ; 跳板：原 5 字节 + jmp 原函数+5
+    fk_reentrant:
+        jmp  dword ptr [g_findKeyTramp]          ; 重入：原样走原函数（不装 post）
     }
 }
 
