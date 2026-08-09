@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q18"
+#define CJK_VERSION "v23q19"
 
 #include "pch.h"
 
@@ -2077,12 +2077,14 @@ static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
             }
         }
 
-        // ★ v23q18 特殊诊断：破折号（0x2014）或长文本（n>20）无条件记录（独立文件，
+        // ★ v23q18 特殊诊断：破折号（0x2014）或【含中文长文本】无条件记录（独立文件，
         //   不受 150 条配额影响）——看"用我的——"/"看来…"运行时实际字节形态
+        // ★ v23q19：条件收紧——n>20 会被资源路径（I:\SteamLib... 31-171 WORD）刷屏
+        //   （v23q18 实证 F9SP 1-25 全是路径），改为 hasCjk（strong 判据）过滤
         {
             int hasDash = 0;
             for (int i = 0; i < n && i < 64; i++) if (w[i] == 0x2014) { hasDash = 1; break; }
-            if (hasDash || n > 20)
+            if (hasDash || (hasCjk && n > 4))
             {
                 static volatile LONG s_sp = 0;
                 LONG p = InterlockedIncrement(&s_sp);
