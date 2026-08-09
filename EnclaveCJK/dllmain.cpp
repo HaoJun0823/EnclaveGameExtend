@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q8"
+#define CJK_VERSION "v23q9"
 
 #include "pch.h"
 
@@ -1923,10 +1923,9 @@ static void __declspec(naked) cjk_text_store_impl(void)
         mov  edi, [esi + 4]             ; edi = a2->文本指针
         test edi, edi
         jz   ts_orig                    ; 空文本 → 原逻辑
-        ; ★ v23q8 诊断：记录 TEXT 存储源文本（前 200 次）
-        push edi
-        call cjk_textstore_diag
-        add  esp, 4
+        ; ★ v23q9：禁用 v23q8 诊断（cjk_textstore_diag）——v23q8 实证 TEXT 存储点
+        ;   从未触发（CJK_tstore_log.txt 不存在），IO 无意义
+        ; push edi / call cjk_textstore_diag / add esp, 4
         ; 扫描前 16 WORD：偶数偏移字节==0 且下字节非 0 → UTF-16 宽文本特征
         xor  ebx, ebx
     ts_scan:
@@ -2984,28 +2983,9 @@ static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr)
                 (c >= 0xFF00 && c <= 0xFFEF)) hasCjk = 1;
             n++;
         }
-        // ★ v23q.7 诊断：记录【所有含中文的】输入（前 100 条）——加载画面 §LSTD_LOADING
-        //   （纯 ASCII key 无中文）不记录防刷屏；教程提示（含中文正文）无论 SL=0/1 必记录，
-        //   直接判定：教程文本到底经不经 SubstituteKeys 0x10AA20 入口、§L 是否已在上游展开。
-        if (hasCjk)
-        {
-            LONG p = InterlockedIncrement(&s_probe);
-            if (p <= 100)
-            {
-                char sb[380]; char* q = sb;
-                q += wsprintfA(q, "[SUBST %ld] ptr=%08X n=%d SL=%d CJK=%d | ", p, textPtr, n, hasSL, hasCjk);
-                for (i = 0; i < 20 && i < n + 1; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
-                q += wsprintfA(q, "\n");
-                HANDLE h = CreateFileA("CJK_subst_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
-                                       NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-                if (h != INVALID_HANDLE_VALUE)
-                {
-                    SetFilePointer(h, 0, NULL, FILE_END);
-                    DWORD wn; WriteFile(h, sb, (DWORD)(q - sb), &wn, NULL);
-                    CloseHandle(h);
-                }
-            }
-        }
+        // ★ v23q9：禁用 v23q.7 诊断（subst_log）——v23q7 实证 SubstituteKeys 入口
+        //   无含中文输入（CJK_subst_log 0 条），hasCjk 扫描本身有开销，删之
+        // if (hasCjk) { ... CJK_subst_log.txt ... }
         if (!hasSL || !hasCjk || n < 4) return;
         WORD ebuf[260];
         int en = tfstr_expand_keys(w, n, ebuf, 256);
@@ -3165,12 +3145,9 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         mov  esi, [esp + 0x20]          ; 源
         mov  edi, [esp + 0x18]          ; 原 ecx = 目标（宽）
         mov  ebx, [esp + 0x28]          ; len
-        ; ★ v23q7 诊断：记录实际处理的键名（源/目标/长度/字节）
-        push edi
-        push ebx
-        push esi
-        call cjk_key_diag
-        add  esp, 12
+        ; ★ v23q9：禁用 v23q7 诊断（cjk_key_diag）——v23q7 实证 subst_key 从未执行
+        ;   （CJK_keydiag_log.txt 不存在），且每次调用 IO 拖慢渲染放大竞态
+        ; push edi / push ebx / push esi / call cjk_key_diag / add esp, 12
         xor  edx, edx                   ; 源偏移
         ; 宽窄判别：byte[1]==0 → 宽键名（逐宽字符）；否则窄键名（逐字节）
         cmp  byte ptr [esi + 1], 0
@@ -4296,7 +4273,15 @@ static void h5_diag(DWORD retRva, int found, int slen, const BYTE* data)
     __except (EXCEPTION_EXECUTE_HANDLER) { }
     if (!hasHi) return;
     p += wsprintfA(p, "\r\n");
-    diag_write(buf);
+    // ★ v23q9：独立文件（diag_write 的 160 条总配额被 SN 构造噪声占满，H5 从未落盘）
+    HANDLE h = CreateFileA("CJK_h5_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        SetFilePointer(h, 0, NULL, FILE_END);
+        DWORD wn; WriteFile(h, buf, (DWORD)(p - buf), &wn, NULL);
+        CloseHandle(h);
+    }
 }
 
 // 返回 >0 = 用这个字节数；0 = 放行原 strlen
@@ -4304,6 +4289,7 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
 {
     void* obj;
     int len = 0, slen = 0, i;
+    int wcnt = 0, slen_wide = 0;
     BYTE head[10];
 
     if (!data) return 0;
@@ -4318,21 +4304,27 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 
+    // 宽扫描：WORD 到 0x0000 —— 实时读缓冲（无 g_len 表竞态）；低字节 0x00 汉字不腰斩
+    while (wcnt < 252 && ((const WORD*)data)[wcnt]) wcnt++;
+    slen_wide = wcnt * 2;
+
     h5_diag(retRva, len, slen, (const BYTE*)data);
-    // ★ v18i：宽扫描接管（WORD 到 0x0000）——低字节 0x00 汉字（一/攀/需/开…）在窄 strlen 被腰斩！
-    //   「你拾起了一支火把」→「你拾起了」：一=U+4E00（LE 字节 00 4E），窄 strlen 在 00 处停。
-    //   宽扫描 > 窄扫描（存在 0x00 截断）→ 用宽长度（不限区间，0x00 汉字对象才触发，低风险；
-    //   窄对象宽扫描越界会 >LEN_MAXB 自动不接管）
+
+    // ★ v23q9：字幕区间内【优先宽扫描长度】——根治句尾 @/@攀/@攀 闪烁
+    //   根因：g_len 登记表 key=TFStr 对象指针，对象池复用 → 旧文本长度残留；
+    //   g_len 无锁，构造线程写 ⟷ 渲染线程读竞态 → 偶尔读到旧（偏大）长度 →
+    //   hook5 让引擎按 len 拷贝 → 越界拷贝缓冲尾部残留（半角字节+相邻文本如"攀"）
+    //   → 渲染显示 @/@攀（大部分帧正确 = 竞态窗口小，少部分帧中招）。
+    //   宽扫描实时读缓冲 = 准确 + 无竞态，彻底绕开 g_len（v18i 只在 slen_wide>slen
+    //   时接管，纯高字节汉字文本仍走 g_len 竞态分支——本次改为区间内一律宽扫描优先）。
+    if (retRva >= SUB_LO && retRva <= SUB_HI)
     {
-        int wcnt = 0;
-        while (wcnt < 252 && ((const WORD*)data)[wcnt]) wcnt++;
-        int slen_wide = wcnt * 2;
-        if (slen_wide > slen && slen_wide <= LEN_MAXB)
+        if (slen_wide > 0 && slen_wide <= LEN_MAXB && slen_wide >= slen)
             return slen_wide;
+        return (len > slen && len <= LEN_MAXB) ? len : 0;
     }
     // v16n：区间外（教程/UI 绘制）只记录不接管 —— 防止误改非字幕文本长度
-    if (retRva < SUB_LO || retRva > SUB_HI) return 0;
-    return (len > slen && len <= LEN_MAXB) ? len : 0;
+    return 0;
 }
 
 static void __declspec(naked) cjk_draw_len_trampoline_impl(void)
