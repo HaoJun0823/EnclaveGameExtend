@@ -1919,6 +1919,203 @@ static int install_text_store_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ★ v23（纯只读探针）：hook sub_100F9CCA / sub_100EFCBA 函数本体，
+//   批量 log「含 CJK 的文本」每次经过时的 caller + 文本 hex → CJK_probe_log.txt
+//
+//   ◆ 目的：定位「你拾起了一支火把」→「你拾起了」的真实截断路径。
+//     v22 hook 调用点 0x7948 无效 → 教程 TEXT 可能不走该调用点；
+//     改 hook **函数本体** = 拦截所有调用者（无论从哪个调用点进来），
+//     且【行为零修改】：扫描完直接 trampoline 执行原逻辑，绝不死循环。
+//
+//   ◆ sub_100F9CCA（RVA 0xF9CCA）头部 5B = `8B 54 24 04 56`
+//     （mov edx,[esp+4]; push esi）——完整指令，可安全覆盖 5B。
+//     进入：[esp]=返回地址(caller), [esp+4]=a2(CStr*), ecx=this
+//     源文本指针 = [a2+4]（v21 handler 实证布局：{vtable, text*}）
+//   ◆ sub_100EFCBA（RVA 0xEFCBA）头部前 5B = `53 56 57 8B 7C` 会截断
+//     mov edi,[esp+0Ch] → 必须覆盖 7B（`53 56 57 8B 7C 24 0C`），
+//     trampoline 复制 7B + jmp entry+7。
+//     进入：[esp]=返回地址(caller), [esp+4]=arg_0(源CStr*), ecx=this
+//     源文本指针 = [arg_0+4]
+//
+//   ◆ 重入保护：g_inProbe 标志（volatile LONG），探针执行期间再入 → 直接
+//     trampoline 原逻辑，杜绝递归死循环。
+// ═══════════════════════════════════════════════════════════════════════
+#define GW_F9CCA_BODY_RVA  0xF9CCAu    // sub_100F9CCA 本体（TEXT 存储咽喉）
+#define GW_EFCBA_BODY_RVA  0xEFCBAu    // sub_100EFCBA 本体（窄路径深拷贝=截断点）
+static BYTE   g_origF9CCA[5];
+static BYTE*  g_f9ccaTramp = NULL;
+static BYTE   g_origEFCBA[7];
+static BYTE*  g_efcbaTramp = NULL;
+static volatile LONG g_inProbe = 0;
+
+// probe_log_c：扫描文本前 128 WORD，命中 CJK → 写 CJK_probe_log.txt（去重限流）
+// cdecl 参数：probe_log_c(const char* tag, DWORD caller, const BYTE* txt)
+static void probe_log_c(const char* tag, DWORD caller, const BYTE* txt)
+{
+    char  buf[640];
+    char* p = buf;
+    int   i, found = 0, sigMatch = 0;
+    WORD  sig[4];
+    static DWORD s_lastCaller = 0;
+    static WORD  s_sig[4] = {0};
+
+    if (!txt) return;
+    // 扫描前 128 WORD：CJK 汉字/标点 或 低字节0x00+高字节非0（UTF-16 宽特征）
+    for (i = 0; i < 128; i++)
+    {
+        WORD w = *(WORD*)(txt + i * 2);
+        if (w == 0) break;
+        if ((w >= 0x4E00 && w <= 0x9FFF) || (w >= 0x3000 && w <= 0x30FF) ||
+            ((w & 0xFF) == 0 && (w >> 8) != 0)) { found = 1; break; }
+    }
+    if (!found) return;
+    // 去重：caller + 前 4 WORD 与上次相同 → 跳过（防高频重复刷爆）
+    for (i = 0; i < 4; i++) sig[i] = *(WORD*)(txt + i * 2);
+    if (caller == s_lastCaller && sig[0] == s_sig[0] && sig[1] == s_sig[1] &&
+        sig[2] == s_sig[2] && sig[3] == s_sig[3]) return;
+    s_lastCaller = caller;
+    for (i = 0; i < 4; i++) s_sig[i] = sig[i];
+
+    p += wsprintfA(p, "[%s] caller=%08X 文本前32WORD: ", tag, caller);
+    for (i = 0; i < 32; i++)
+    {
+        WORD w = *(WORD*)(txt + i * 2);
+        if (w == 0) break;
+        if (w >= 0x20 && w <= 0x7E) p += wsprintfA(p, "%c", (char)w);
+        else if ((w >= 0x4E00 && w <= 0x9FFF) || (w >= 0x3000 && w <= 0x30FF))
+            p += wsprintfA(p, "[%04X]", w);
+        else p += wsprintfA(p, "<%02X%02X>", w & 0xFF, w >> 8);
+    }
+    p += wsprintfA(p, "\n");
+    HANDLE h = CreateFileA("CJK_probe_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    SetFilePointer(h, 0, NULL, FILE_END);
+    DWORD written;
+    WriteFile(h, buf, (DWORD)(p - buf), &written, NULL);
+    CloseHandle(h);
+}
+
+// 探针 tag 字符串（naked asm push offset 引用，必须在使用前声明）
+static const char probe_tag_f9cca[] = "F9CCA";
+static const char probe_tag_efcba[] = "EFCBA";
+
+static void __declspec(naked) cjk_f9cca_probe(void)
+{
+    __asm
+    {
+        ; 进入：[esp]=返回地址(caller), [esp+4]=a2(CStr*), ecx=this
+        pushad
+        ; pushad 布局: [0x00]EDI [0x04]ESI [0x08]EBP [0x0C]ESP [0x10]EBX [0x14]EDX [0x18]ECX [0x1C]EAX
+        ; [esp+0x20]=caller, [esp+0x24]=a2
+        cmp  byte ptr [g_inProbe], 1
+        je   f9_skip
+        mov  byte ptr [g_inProbe], 1
+        mov  eax, [esp + 0x24]          ; a2
+        test eax, eax
+        jz   f9_done
+        mov  esi, [eax + 4]             ; 文本指针 = a2->+4
+        test esi, esi
+        jz   f9_done
+        mov  ebx, [esp + 0x20]          ; caller
+        push esi                        ; 参数3: txt
+        push ebx                        ; 参数2: caller
+        push offset probe_tag_f9cca     ; 参数1: tag
+        call probe_log_c
+        add  esp, 12
+    f9_done:
+        mov  byte ptr [g_inProbe], 0
+    f9_skip:
+        popad
+        jmp  dword ptr [g_f9ccaTramp]
+    }
+}
+
+static void __declspec(naked) cjk_efcba_probe(void)
+{
+    __asm
+    {
+        ; 进入：[esp]=返回地址(caller), [esp+4]=arg_0(源CStr*), ecx=this
+        pushad
+        cmp  byte ptr [g_inProbe], 1
+        je   ef_skip
+        mov  byte ptr [g_inProbe], 1
+        mov  eax, [esp + 0x24]          ; arg_0
+        test eax, eax
+        jz   ef_done
+        mov  esi, [eax + 4]             ; 文本指针 = arg_0->+4
+        test esi, esi
+        jz   ef_done
+        mov  ebx, [esp + 0x20]          ; caller
+        push esi
+        push ebx
+        push offset probe_tag_efcba
+        call probe_log_c
+        add  esp, 12
+    ef_done:
+        mov  byte ptr [g_inProbe], 0
+    ef_skip:
+        popad
+        jmp  dword ptr [g_efcbaTramp]
+    }
+}
+
+static int install_probe_hook(void)
+{
+    BYTE* e1;
+    BYTE* e2;
+    DWORD oldProt;
+    static const BYTE expect1[5] = {0x8B, 0x54, 0x24, 0x04, 0x56}; // mov edx,[esp+4]; push esi
+    static const BYTE expect2[7] = {0x53, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x0C}; // push ebx;esi;edi; mov edi,[esp+0Ch]
+    if (g_f9ccaTramp && g_efcbaTramp) return 1;
+    if (!g_gwBase) return 0;
+
+    // P1: sub_100F9CCA 本体（5B）
+    e1 = (BYTE*)g_gwBase + GW_F9CCA_BODY_RVA;
+    if (memcmp(e1, expect1, 5) != 0)
+    {
+        log_msg("[CJK] v23 F9CCA 头部核验失败：%02X %02X %02X %02X %02X，跳过\n",
+                e1[0], e1[1], e1[2], e1[3], e1[4]);
+        return 0;
+    }
+    g_f9ccaTramp = (BYTE*)VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_f9ccaTramp) return 0;
+    memcpy(g_origF9CCA, e1, 5);
+    memcpy(g_f9ccaTramp, e1, 5);
+    g_f9ccaTramp[5] = 0xE9;
+    *(DWORD*)(g_f9ccaTramp + 6) = ((DWORD)e1 + 5) - ((DWORD)g_f9ccaTramp + 11);
+    VirtualProtect(e1, 5, PAGE_EXECUTE_READWRITE, &oldProt);
+    e1[0] = 0xE9;
+    *(DWORD*)(e1 + 1) = (DWORD)cjk_f9cca_probe - ((DWORD)e1 + 5);
+    VirtualProtect(e1, 5, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), e1, 5);
+
+    // P2: sub_100EFCBA 本体（7B）
+    e2 = (BYTE*)g_gwBase + GW_EFCBA_BODY_RVA;
+    if (memcmp(e2, expect2, 7) != 0)
+    {
+        log_msg("[CJK] v23 EFCBA 头部核验失败：%02X %02X %02X %02X %02X %02X %02X，跳过\n",
+                e2[0], e2[1], e2[2], e2[3], e2[4], e2[5], e2[6]);
+        return 0;
+    }
+    g_efcbaTramp = (BYTE*)VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_efcbaTramp) return 0;
+    memcpy(g_origEFCBA, e2, 7);
+    memcpy(g_efcbaTramp, e2, 7);
+    g_efcbaTramp[7] = 0xE9;
+    *(DWORD*)(g_efcbaTramp + 8) = ((DWORD)e2 + 7) - ((DWORD)g_efcbaTramp + 13);
+    VirtualProtect(e2, 7, PAGE_EXECUTE_READWRITE, &oldProt);
+    e2[0] = 0xE9;
+    *(DWORD*)(e2 + 1) = (DWORD)cjk_efcba_probe - ((DWORD)e2 + 5);
+    VirtualProtect(e2, 7, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), e2, 7);
+
+    log_msg("[CJK] v23 只读探针安装：F9CCA本体=%08X EFCBA本体=%08X（CJK_probe_log.txt）\n",
+            (DWORD)e1, (DWORD)e2);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ★ v18（x64dbg 动态取证定案）：hook Localize_SubstituteKeys 内 call 0x44EA 调用点
 //   （MSystem RVA 0x10ABEA）——§L 键名展开的【最终写入点】！
 //
@@ -3159,6 +3356,8 @@ static BOOL install_hook(void)
             //   （教程查表命中）。v21 handler 检测 UTF-16 宽文本 → 强制走宽路径
             //   （sub_100FFD90 引用共享，不截断）。
             install_text_store_hook();
+            // ★ v23：只读探针（F9CCA/EFCBA 本体）——log 含 CJK 文本的必经路径
+            install_probe_hook();
             // ★ v18f：hook 0x10ABEA 调用点（键名'XXX'首字符判别——键名全角化，
             //   宽文本值模拟原 call 0x44EA 原样处理）。
             //   【v18f 禁用 0x44EA 本体 hook】：v18e 实测崩溃（0xC0000096 空跳转）——
