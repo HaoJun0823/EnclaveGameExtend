@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q14"
+#define CJK_VERSION "v23q15"
 
 #include "pch.h"
 
@@ -4397,6 +4397,7 @@ static DWORD trie_match_at(const WORD* s, int off, int maxScan)
 }
 
 static void trie_load_xrg(void);   // v23q14 前向声明（定义在下方）
+static void trie_log_entry(const char* src, const WORD* val, int vi, int isKey, const WORD* key, int ki);  // v23q15
 
 static void trie_load(void)
 {
@@ -4436,7 +4437,11 @@ static void trie_load(void)
                     if (w[i] == 0x000D || w[i] == 0x000A) break;     // 行内
                     val[vi++] = w[i++];
                 }
-                if (vi > 0) trie_insert(val, vi);
+                if (vi > 0)
+                {
+                    trie_insert(val, vi);
+                    trie_log_entry("StringTable_Eng.txt", val, vi, 1, key, ki);   // v23q15 审查日志
+                }
             }
         }
         i++;
@@ -4449,13 +4454,42 @@ static void trie_load(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// ★ v23q14：.xrg *TEXT 提取——扫描 *TEXT "值"（UTF-16LE），含中文的值加入 Trie。
-//   只扫游戏实际加载的目录（Sbz1\Dialogues 对话/过场、Videos 过场字幕、Gui 菜单、
-//   registry 数据表等），**排除 chs_project\ 备份/工程区**（重复+乱码污染源）。
-//   已统计：46 文件 1158 条 *TEXT ≈ 9882 字符 → Trie 节点富余 9 倍。
-//   值含 §L/§p 宏原样 WORD 插入；纯 ASCII（英文）值跳过（英文窄路径有终止符无 @ 问题）。
+// ★ v23q14/15：.xrg *TEXT 提取——扫描 *TEXT "值"（UTF-16LE），含中文的值加入 Trie。
+//   ★ v23q15（用户裁定）：【只有 Sbz1\Dialogues\*.xrg 与 StringTable_Eng.txt 含翻译文字】，
+//     其余 .xrg（Videos/Gui/registry/Anim/skies/Feedback）是宏定义无需提取 → 只扫 Dialogues。
+//   已统计：Dialogues 含 ~40 文件、TEXT 值 ≈ 数千字符 → Trie 富余充足。
+//   值含 §L/§p 宏原样 WORD 插入；纯 ASCII（英文）值跳过（英文窄路径深拷贝有终止符无 @ 问题）。
+//   每条提取记录到 CJK_trie_log.txt（UTF-8）供用户审查。
 // ═══════════════════════════════════════════════════════════════════════
-static void trie_load_xrg_file(const char* path)
+static void trie_log_entry(const char* src, const WORD* val, int vi, int isKey, const WORD* key, int ki)
+{
+    char vbuf[1200];
+    int vb = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)val, vi, vbuf, sizeof(vbuf) - 1, NULL, NULL);
+    if (vb <= 0) return;
+    vbuf[vb] = 0;
+    char sb[1400];
+    int n;
+    if (isKey)
+    {
+        char kb[128];
+        int kb2 = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)key, ki, kb, 120, NULL, NULL);
+        if (kb2 <= 0) return;
+        kb[kb2] = 0;
+        n = wsprintfA(sb, "[TRIE] %s  KEY=%s  WORD=%d  值=\"%s\"\n", src, kb, vi, vbuf);
+    }
+    else
+        n = wsprintfA(sb, "[TRIE] %s  WORD=%d  值=\"%s\"\n", src, vi, vbuf);
+    HANDLE h = CreateFileA("CJK_trie_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        SetFilePointer(h, 0, NULL, FILE_END);
+        DWORD wn; WriteFile(h, sb, (DWORD)n, &wn, NULL);
+        CloseHandle(h);
+    }
+}
+
+static void trie_load_xrg_file(const char* src, const char* path)
 {
     HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -4486,7 +4520,11 @@ static void trie_load_xrg_file(const char* path)
                     if (w[j] > 0x7F) hasHi = 1;
                     val[vi++] = w[j++];
                 }
-                if (vi > 0 && hasHi) trie_insert(val, vi);              // 只插含中文的
+                if (vi > 0 && hasHi)
+                {
+                    trie_insert(val, vi);                 // 固化进 Trie 内存
+                    trie_log_entry(src, val, vi, 0, NULL, 0);   // 审查日志
+                }
                 i = j + 1;
                 continue;
             }
@@ -4508,21 +4546,15 @@ static void trie_load_xrg_dir(const char* dir)
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         char path[340];
         wsprintfA(path, "%s\\%s", dir, fd.cFileName);
-        trie_load_xrg_file(path);
+        trie_load_xrg_file(fd.cFileName, path);
     } while (FindNextFileA(hf, &fd));
     FindClose(hf);
 }
 
 static void trie_load_xrg(void)
 {
-    trie_load_xrg_dir("Sbz1");
+    // ★ v23q15：只有 Dialogues 含翻译文字，其余 .xrg 是宏 → 只扫 Dialogues
     trie_load_xrg_dir("Sbz1\\Dialogues");
-    trie_load_xrg_dir("Sbz1\\Videos");
-    trie_load_xrg_dir("Sbz1\\Gui");
-    trie_load_xrg_dir("Sbz1\\registry");
-    trie_load_xrg_dir("Sbz1\\Anim");
-    trie_load_xrg_dir("Sbz1\\skies");
-    trie_load_xrg_dir("Sbz1\\Feedback");
 }
 
 // ★ hook 5：0x100F9B59（绘制前拷贝 0x100F9AFA 内的 strlen）—— 最后一道关卡
