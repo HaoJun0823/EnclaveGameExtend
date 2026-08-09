@@ -2276,25 +2276,30 @@ static BOOL WINAPI my_MsReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfB
 }
 
 // 安装：校验 IAT 槽现值 = kernel32 导出地址后替换
-static int install_file_probe_hook(void)
+// ★ v23g：拆成两半——EXE 部分在 DllMain 里【立即】执行（教程 LM01.xrg 在启动极早期
+//   就被 EXE 读取，等 GameWorld 加载再 hook 会错过）；GW/MS 部分保持等 GameWorld。
+// 先定义 EXE 专用安装（供 DllMain 调用）
+static int install_exe_file_probe_hook(void)
 {
     HMODULE hK32;
+    HMODULE hExe;
     DWORD*  slot;
     DWORD   oldProt;
     DWORD   cur;
 
-    if (!g_exeBase) return 0;
     hK32 = GetModuleHandleA("kernel32.dll");
-    if (!hK32) return 0;
+    hExe = GetModuleHandleA(NULL);
+    if (!hK32 || !hExe) return 0;
+    g_exeBase = (DWORD)hExe;
 
-    // CreateFileA 槽
+    // EXE CreateFileA 槽
     slot = (DWORD*)(g_exeBase + IAT_EXE_CREATEFILEA_RVA);
     __try
     {
         cur = *slot;
         if (cur != (DWORD)GetProcAddress(hK32, "CreateFileA"))
         {
-            log_msg("[CJK] v23d EXE CreateFileA 槽校验失败：%08X != %08X，跳过\n",
+            log_msg("[CJK] v23g EXE CreateFileA 槽校验失败：%08X != %08X，跳过\n",
                     cur, (DWORD)GetProcAddress(hK32, "CreateFileA"));
             return 0;
         }
@@ -2302,19 +2307,19 @@ static int install_file_probe_hook(void)
         VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
         *slot = (DWORD)my_ExeCreateFileA;
         VirtualProtect(slot, 4, oldProt, &oldProt);
-        log_msg("[CJK] v23d EXE CreateFileA IAT hook：%08X -> %08X（CJK_file_log.txt）\n",
+        log_msg("[CJK] v23g EXE CreateFileA IAT hook：%08X -> %08X（CJK_file_log.txt）\n",
                 (DWORD)slot, (DWORD)my_ExeCreateFileA);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 
-    // ReadFile 槽
+    // EXE ReadFile 槽
     slot = (DWORD*)(g_exeBase + IAT_EXE_READFILE_RVA);
     __try
     {
         cur = *slot;
         if (cur != (DWORD)GetProcAddress(hK32, "ReadFile"))
         {
-            log_msg("[CJK] v23d EXE ReadFile 槽校验失败：%08X != %08X，跳过\n",
+            log_msg("[CJK] v23g EXE ReadFile 槽校验失败：%08X != %08X，跳过\n",
                     cur, (DWORD)GetProcAddress(hK32, "ReadFile"));
             return 0;
         }
@@ -2322,9 +2327,23 @@ static int install_file_probe_hook(void)
         VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
         *slot = (DWORD)my_ExeReadFile;
         VirtualProtect(slot, 4, oldProt, &oldProt);
-        log_msg("[CJK] v23d EXE ReadFile IAT hook：%08X -> %08X\n", (DWORD)slot, (DWORD)my_ExeReadFile);
+        log_msg("[CJK] v23g EXE ReadFile IAT hook：%08X -> %08X\n", (DWORD)slot, (DWORD)my_ExeReadFile);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+    return 1;
+}
+
+// GW/MS 文件探针（等 GameWorld 加载后由 install_hook 调用）
+static int install_file_probe_hook(void)
+{
+    HMODULE hK32;
+    DWORD*  slot;
+    DWORD   oldProt;
+    DWORD   cur;
+
+    hK32 = GetModuleHandleA("kernel32.dll");
+    if (!hK32) return 0;
 
     // ★ v23e：GameWorld CreateFileA/ReadFile（DIALOGUES 加载器 sub_1008D500 打开 LM01.xrg 走这里）
     if (g_gwBase)
@@ -3705,8 +3724,10 @@ static BOOL install_hook(void)
             }
 
             // ★ v23d：EXE CreateFileA/ReadFile IAT 探针（记录 .xrg 文件打开 + caller）
-            //   —— 教程 LM01.xrg 由 EXE 直接解析渲染，不走 GameWorld 的 F9CCA
-            if (g_exeBase) install_file_probe_hook();
+            //   —— 教程 LM01.xrg 由 EXE 直接解析渲染，不走 GameWorld 的 F9CCA。
+            //   v23g：EXE 部分已在 DllMain 立即安装（启动极早期就读 LM01.xrg），
+            //   这里只装 GW/MS 部分（依赖 g_gwBase）。
+            install_file_probe_hook();
 
             // ★ v16m：渲染最终出口 GDI TextOutW —— 教程文本的唯一观察点（直接渲染路径）
             {
@@ -3888,6 +3909,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     if (ul_reason_for_call == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hModule);
+        // ★ v23g：EXE 文件 API 探针必须在【进程最早阶段】安装——
+        //   教程 LM01.xrg 在启动极早期（GameWorld 加载前）就被 EXE 读取，
+        //   wait_thread 等 GameWorld 会错过。这里同步立即 hook。
+        install_exe_file_probe_hook();
         HANDLE h = CreateThread(NULL, 0, wait_thread, NULL, 0, NULL);
         if (h) CloseHandle(h);
     }
