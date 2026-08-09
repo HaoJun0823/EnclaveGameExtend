@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q22.1"
+#define CJK_VERSION "v23q23"
 
 #include "pch.h"
 
@@ -5302,6 +5302,47 @@ static BOOL install_hook(void)
     return TRUE;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23q23：GameWorld 0xF1A50 jne→nop 运行时补丁（磁盘纯净化）
+//   【背景】Steam 纯净版 GameWorld.dll（md5 71b0704f）在 0xF1A50 是 jne 逻辑：
+//     0xF1A54 test ch,0xA0 ; 0xF1A57 jne→返回空串 ; 0xF1A69 test ch,0xA0 ; 0xF1A6C jne→返回0
+//     —— ch&0xA0≠0（高字节在 0xA0-0xBF / 0xE0-0xFF 的 CJK 字符，如"魔"0x9B54）
+//     一律被拒 → 汉化中文游戏内文本走失败路径 → 空白/异常。
+//     （英文原版全 ASCII：ch=0x00 → ch&0xA0=0 → jne 不跳 → 正常，所以原版游戏没事。）
+//   历史上这个函数被磁盘补丁为 nop（90 90）→ 中文正常；用户实测确认 nop 版显示正常。
+//   【修法】完整 DLL hook 化：GameWorld.dll 保持 Steam 纯净（不落盘补丁），
+//   EnclaveCJK 加载后【运行时】把两处 jne 改 nop（VirtualProtect+核验 expect），
+//   效果与磁盘补丁完全一致，且磁盘文件 100% 纯净可过 Steam 校验。
+// ═══════════════════════════════════════════════════════════════════════
+#define GW_F1A55_RVA 0xF1A55u    // 第一处 jne（75 07）
+#define GW_F1A6A_RVA 0xF1A6Au    // 第二处 jne（75 04）
+
+static void patch_gw_cjk_jne(void)
+{
+    __try
+    {
+        if (!g_gwBase) return;
+        BYTE* p1 = (BYTE*)(g_gwBase + GW_F1A55_RVA);
+        BYTE* p2 = (BYTE*)(g_gwBase + GW_F1A6A_RVA);
+        // 核验 Steam 原版 jne（75 07 / 75 04）；已 nop 或非预期 → 跳过（幂等安全）
+        if (p1[0] != 0x75 || p1[1] != 0x07 || p2[0] != 0x75 || p2[1] != 0x04) return;
+        DWORD old;
+        if (VirtualProtect(p1, 2, PAGE_EXECUTE_READWRITE, &old))
+        {
+            p1[0] = 0x90; p1[1] = 0x90;              // jne +7 → nop nop
+            VirtualProtect(p1, 2, old, &old);
+        }
+        if (VirtualProtect(p2, 2, PAGE_EXECUTE_READWRITE, &old))
+        {
+            p2[0] = 0x90; p2[1] = 0x90;              // jne +4 → nop nop
+            VirtualProtect(p2, 2, old, &old);
+        }
+        FlushInstructionCache(GetCurrentProcess(), p1, 4);
+        log_msg("[CJK] v23q23 GameWorld 0xF1A50 jne→nop 运行时补丁 ✓（磁盘纯净，可过 Steam 校验）\n");
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
 static DWORD WINAPI wait_thread(LPVOID)
 {
     // ★ v23q16：主动加载 Trie 字典（不依赖 h5 触发——过场不走 h5，v23q15 审查日志
@@ -5324,6 +5365,10 @@ static DWORD WINAPI wait_thread(LPVOID)
     // 阶段 1：等 GameWorld 就绪，装主 hook（含 GW 3 槽 IAT）
     while (!install_hook())
         Sleep(100);
+    // ★ v23q23：GameWorld 0xF1A50 jne→nop 运行时补丁（磁盘纯净）——
+    //   Steam 原版 jne 拒绝 ch&0xA0≠0 的 CJK 字符 → 游戏内中文文本空白；
+    //   此处运行时 nop 掉两处 jne（效果 = 历史磁盘 nop 补丁，但磁盘文件纯净）。
+    patch_gw_cjk_jne();
     // 阶段 2：v16j —— GameClasses 通常晚于 install_hook 加载。
     //         原代码 install_hook 一次成功（g_hooked=TRUE）就 return，
     //         GC/narrow IAT 永远补不上 → 教程 HUD（若在 GameClasses）
