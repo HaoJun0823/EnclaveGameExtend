@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q7"
+#define CJK_VERSION "v23q8"
 
 #include "pch.h"
 
@@ -1884,6 +1884,31 @@ static BOOL  g_hookedTextStore = FALSE;
 // 宽路径模拟（sub_100FFD90(this+4, a2+4)，引用共享不截断）：
 //   进入时 [esp]=a2 → push ret 后 [esp]=ret,[esp+4]=a2 → mov [esp+4],a2+4
 //   → lea ecx,[this+4] → jmp sub_100FFD90（ret 0x04 弹 a2+4 → 返回 ret）→ 栈平衡
+// ★ v23q8 诊断：v21 TEXT 存储点收到的源文本（前 200 次）——
+//   教程 TEXT（.xrg *TEXT 值，含 §L 宏）存储必经点。
+//   记录文本形态：§L 原文（A7 00 4C 00）/ 已展开键名（半角 0x27 或全角 0xFF07）→
+//   判定教程路径 + 全角化来源 + 预展开正确落点。
+static void __declspec(noinline) cjk_textstore_diag(const WORD* w)
+{
+    static volatile LONG s_cnt = 0;
+    LONG c = InterlockedIncrement(&s_cnt);
+    if (c > 200) return;
+    int n = 0;
+    while (n < 40 && w[n]) n++;
+    char sb[400]; char* q = sb;
+    q += wsprintfA(q, "[TSTORE %ld] ptr=%08X n=%d | ", c, w, n);
+    for (int i = 0; i < n; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
+    q += wsprintfA(q, "\n");
+    HANDLE h = CreateFileA("CJK_tstore_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        SetFilePointer(h, 0, NULL, FILE_END);
+        DWORD wn; WriteFile(h, sb, (DWORD)(q - sb), &wn, NULL);
+        CloseHandle(h);
+    }
+}
+
 static void __declspec(naked) cjk_text_store_impl(void)
 {
     __asm
@@ -1898,6 +1923,10 @@ static void __declspec(naked) cjk_text_store_impl(void)
         mov  edi, [esi + 4]             ; edi = a2->文本指针
         test edi, edi
         jz   ts_orig                    ; 空文本 → 原逻辑
+        ; ★ v23q8 诊断：记录 TEXT 存储源文本（前 200 次）
+        push edi
+        call cjk_textstore_diag
+        add  esp, 4
         ; 扫描前 16 WORD：偶数偏移字节==0 且下字节非 0 → UTF-16 宽文本特征
         xor  ebx, ebx
     ts_scan:
