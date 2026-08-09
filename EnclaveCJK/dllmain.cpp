@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v22"
+#define CJK_VERSION "v23o"
 
 #include "pch.h"
 
@@ -2382,7 +2382,10 @@ static volatile LONG g_inCcProbe2 = 0;
 // 进入：[esp]=caller, [esp+4]=VCStr(8B: vtable,p), [esp+0xC]=int, [esp+0x10]=ECompressTypes,
 //        [esp+0x14]=ESettings, ecx=this
 //   ★ VCStr 按值传 8B：低 4B=vtable@原[esp+4]，高 4B=p@原[esp+8]
-//   pushad 后：[esp+0x20]=原[esp]=caller, [esp+0x28]=原[esp+4]=vtable, [esp+0x2C]=原[esp+8]=p
+//   pushad 压 8 regs=32B：原[esp+0]→[esp+0x20]、原[esp+4]→[esp+0x24]、
+//   原[esp+8]→[esp+0x28]、原[esp+0xC]→[esp+0x2C]
+//   ★ v23o 修正：v23k 误读 [esp+0x2C]（=int 参数）当文件名 p → strstr(int值) AV →
+//   异常分发二次崩溃（ntdll+0x502F8 dump 实证）。正确偏移 = [esp+0x28]。
 static void __declspec(naked) my_McCcOpen(void)
 {
     __asm
@@ -2391,7 +2394,7 @@ static void __declspec(naked) my_McCcOpen(void)
         cmp  byte ptr [g_inCcProbe2], 1
         je   mo_skip
         mov  byte ptr [g_inCcProbe2], 1
-        mov  eax, [esp + 0x2C]          ; VCStr.p（文件名）
+        mov  eax, [esp + 0x28]          ; VCStr.p（文件名）★ v23o 修正（原 0x2C 是 int 参数）
         mov  ebx, [esp + 0x20]          ; caller
         test eax, eax
         jz   mo_done
@@ -4129,7 +4132,10 @@ static BOOL install_hook(void)
             //   （sub_100FFD90 引用共享，不截断）。
             install_text_store_hook();
             // ★ v23：只读探针（F9CCA/EFCBA 本体）——log 含 CJK 文本的必经路径
-            install_probe_hook();
+            // ★ v23o：**禁用**（崩溃修复）——探针 trampoline 在 GameWorld 动态区执行，
+            //   54296 dump 实证 Eip 落在 GameWorld+0xF9AC2 非指令边界（探针区域附近）。
+            //   纯诊断用途，禁用不影响修复。
+            // install_probe_hook();
             // ★ v18f：hook 0x10ABEA 调用点（键名'XXX'首字符判别——键名全角化，
             //   宽文本值模拟原 call 0x44EA 原样处理）。
             //   【v18f 禁用 0x44EA 本体 hook】：v18e 实测崩溃（0xC0000096 空跳转）——
@@ -4175,7 +4181,9 @@ static BOOL install_hook(void)
             //   —— 教程 LM01.xrg 由 EXE 直接解析渲染，不走 GameWorld 的 F9CCA。
             //   v23g：EXE 部分已在 DllMain 立即安装（启动极早期就读 LM01.xrg），
             //   这里只装 GW/MS 部分（依赖 g_gwBase）。
-            install_file_probe_hook();
+            // ★ v23o：**禁用**（崩溃修复）——文件探针与 CCFile 探针同属诊断链，
+            //   与崩溃风险源同批移除。教程读取路径已由 hook1 预展开覆盖。
+            // install_file_probe_hook();
 
             // ★ v16m：渲染最终出口 GDI TextOutW —— 教程文本的唯一观察点（直接渲染路径）
             {
@@ -4440,15 +4448,25 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         // ★ v23g：EXE 文件 API 探针必须在【进程最早阶段】安装——
         //   教程 LM01.xrg 在启动极早期（GameWorld 加载前）就被 EXE 读取，
         //   wait_thread 等 GameWorld 会错过。这里同步立即 hook。
-        install_exe_file_probe_hook();
+        // ★ v23o：**禁用** v23 系列纯诊断探针（崩溃修复）——
+        //   探针只用于诊断（记录文件打开），不参与修复；其 naked+trampoline+
+        //   SEH 组合是 v23m/v23n 崩溃（ntdll+0x502F8 二次崩溃）的风险源。
+        //   教程文本写入者已由用户 CE 实证 = 我们自己的 tfstr_cjk_wide（hook1），
+        //   诊断任务已完成，探针可安全移除。保留函数体供参考。
+        // install_exe_file_probe_hook();
         // ★ v23j：MCCDyn.CCFile::Open 函数本体 hook（EXE/GW/MS 所有模块调用一网打尽）
         //   MCCDyn 被 EXE 静态导入，进程启动即加载；教程 .xrg 读取走 CCFile 必然命中。
-        install_ccfile_open_hook();
-        // ★ v23l：运行时截断文本补全线程（扫描+补「一支火把」，无需断点/拷贝函数定位）
+        // ★ v23o：**禁用**（崩溃修复）——my_McCcOpen 偏移 bug（[esp+0x2C] 是 int 参数
+        //   非 VCStr.p）+ naked 调用带 SEH 的 C 函数（cc_open_log）→ strstr AV →
+        //   异常分发查函数表二次崩溃。纯诊断用途，禁用不影响修复功能。
+        // install_ccfile_open_hook();
+        // ★ v23l 线程已禁用（v23o 崩溃修复）：全内存扫描+写入风险不可控
+#if 0
         {
             HANDLE h2 = CreateThread(NULL, 0, text_fix_thread, NULL, 0, NULL);
             if (h2) CloseHandle(h2);
         }
+#endif
         HANDLE h = CreateThread(NULL, 0, wait_thread, NULL, 0, NULL);
         if (h) CloseHandle(h);
     }
