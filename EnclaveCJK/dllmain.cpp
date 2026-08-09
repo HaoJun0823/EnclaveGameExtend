@@ -2358,6 +2358,80 @@ static void __declspec(naked) my_ExeCcReadln(void)
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23j：hook MCCDyn.CCFile::Open(VCStr,...) 函数本体（RVA 0x233C0）
+//   —— 一网打尽 EXE/GameWorld/MSystem 所有模块对该函数的调用！
+//   v23i 只 hook EXE 的 IAT 槽（0x77268/0x77270）→ 0 条 → 教程读取不在 EXE；
+//   解析导入表实证 GW(0x13E340/0x13E338) 与 MS(0x11C430/0x11C5A4) 也导入 CCFile。
+//   与其补 4 个 IAT 槽，直接 hook 函数本体（所有调用最终都落到这里）。
+//   函数头：mov eax, large fs:0 = 64 A1 00 00 00 00（6 字节完整指令）
+//   trampoline 复制 6B + E9 jmp → 0x233C6（push 0FFFFFFFFh，完整指令）
+// ═══════════════════════════════════════════════════════════════════════
+#define MCC_CCFILE_OPEN_RVA 0x233C0u   // MCCDyn CCFile::Open(VCStr,int,ECompressTypes,ESettings)
+static BYTE  g_openTramp[16];
+static volatile LONG g_inCcProbe2 = 0;
+
+// 进入：[esp]=caller, [esp+4]=VCStr(8B: p,len), [esp+0xC]=int, [esp+0x10]=ECompressTypes,
+//        [esp+0x14]=ESettings, ecx=this → naked 转发：log 文件名+caller → jmp trampoline
+static void __declspec(naked) my_McCcOpen(void)
+{
+    __asm
+    {
+        pushad
+        cmp  byte ptr [g_inCcProbe2], 1
+        je   mo_skip
+        mov  byte ptr [g_inCcProbe2], 1
+        mov  eax, [esp + 0x24]          ; VCStr.p（文件名）
+        mov  ebx, [esp + 0x20]          ; caller
+        test eax, eax
+        jz   mo_done
+        push eax                        ; 参数2: file
+        push ebx                        ; 参数1: caller
+        call cc_open_log
+        add  esp, 8
+    mo_done:
+        mov  byte ptr [g_inCcProbe2], 0
+    mo_skip:
+        popad
+        jmp  dword ptr [g_openTramp]    ; 执行原头 6B + jmp 0x233C6
+    }
+}
+
+// 安装：校验头部字节 → 建 trampoline → patch E9
+static int install_ccfile_open_hook(void)
+{
+    HMODULE hCc;
+    BYTE*   target;
+    DWORD   oldProt;
+
+    hCc = GetModuleHandleA("MCCdyn.dll");
+    if (!hCc) return 0;
+    target = (BYTE*)hCc + MCC_CCFILE_OPEN_RVA;
+    __try
+    {
+        // 校验：64 A1 00 00 00 00 = mov eax, large fs:0
+        if (target[0] != 0x64 || target[1] != 0xA1)
+        {
+            log_msg("[CJK] v23j CCFile::Open 头校验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+                    target[0], target[1], target[2], target[3], target[4], target[5]);
+            return 0;
+        }
+        // trampoline：复制 6B + E9 rel jmp (target+6)
+        memcpy(g_openTramp, target, 6);
+        g_openTramp[6] = 0xE9;
+        *(DWORD*)(g_openTramp + 7) = ((DWORD)target + 6) - ((DWORD)g_openTramp + 11);
+        // patch 函数头
+        VirtualProtect(target, 6, PAGE_EXECUTE_READWRITE, &oldProt);
+        target[0] = 0xE9;
+        *(DWORD*)(target + 1) = (DWORD)my_McCcOpen - ((DWORD)target + 5);
+        VirtualProtect(target, 6, oldProt, &oldProt);
+        log_msg("[CJK] v23j MCCDyn CCFile::Open 本体 hook：%08X -> %08X（CJK_cc_log.txt）\n",
+                (DWORD)target, (DWORD)my_McCcOpen);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+    return 1;
+}
+
 // ★ v23e：GameWorld 的 CreateFileA 也探（DIALOGUES 加载器 sub_1008D500 打开 LM01.xrg 走这里）
 static void __declspec(naked) my_GwCreateFileA(void)
 {
@@ -4110,6 +4184,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         //   教程 LM01.xrg 在启动极早期（GameWorld 加载前）就被 EXE 读取，
         //   wait_thread 等 GameWorld 会错过。这里同步立即 hook。
         install_exe_file_probe_hook();
+        // ★ v23j：MCCDyn.CCFile::Open 函数本体 hook（EXE/GW/MS 所有模块调用一网打尽）
+        //   MCCDyn 被 EXE 静态导入，进程启动即加载；教程 .xrg 读取走 CCFile 必然命中。
+        install_ccfile_open_hook();
         HANDLE h = CreateThread(NULL, 0, wait_thread, NULL, 0, NULL);
         if (h) CloseHandle(h);
     }
