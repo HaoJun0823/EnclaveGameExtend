@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v21"
+#define CJK_VERSION "v22"
 
 #include "pch.h"
 
@@ -1800,23 +1800,27 @@ static int install_getval_call_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// ★ v21（x64dbg 单步取证定案）：hook GameWorld sub_1008E1C0 内 TEXT 存储调用点
-//   （GameWorld RVA 0x8E20C = call sub_100F9CCA）——修复「你拾起了一支火把」截断！
+// ★ v22（x64dbg 断点定案修正）：hook GameWorld sub_10007900 (UI 布局解析器)
+//   "TEXT" 关键字分支调用点（GameWorld RVA 0x7948 = call sub_100F9CCA）
+//   ——修复「你拾起了一支火把」截断！
 //
-//   ◆ x64dbg 单步实证（TEXT 读取点 0x8E1F7 命中 → GetValue 查表命中 → 0x100A9B00）：
-//     教程 TEXT（LM01.xrg *TEXT 值）首字符 = 全角空格 0x3000（LE 00 30）！
-//     → sub_100F9CCA 判定 [文本+1]&0x40：0x30&0x40=0 → 【判窄】→ sub_100EFCBA
-//       → vtable 深拷贝（+76 取窄 strlen 长度 → +108 拷贝）→ 「一」(U+4E00 LE 00 4E)
-//       低字节 0x00 被当结束符 → 截断「一支火把」！
-//     对白「救」=0x6551（LE 51 65）→ [1]=0x65 → 0x65&0x40=0x40 → 判宽 → 完整。
-//   ◆ v20 hook 未命中分支 0x10060615 无效：教程 TEXT 查表【命中】（eax=0x145150A0），
-//     根本不过未命中分支！截断点在【存入】环节 sub_100F9CCA 的窄路径。
-//   ◆ 修复：hook 调用点 0x8E20C（5B E8 B9 BA 06 00 = call 0xF9CCA）→ handler：
-//     检测源 CStr 文本含 UTF-16 宽特征（偶数偏移 0x00 + 下字节非 0）→ 强制走
-//     宽路径（sub_100FFD90 引用共享，不截断）；否则模拟原 call 走原逻辑。
+//   ◆ v21 教训（hook 错位置）：v21 hook 的是 sub_1008E1C0（对话脚本解析器）
+//     内 call sub_100F9CCA（RVA 0x8E20C）——但教程 TEXT（LM01.xrg *TEXT 值）
+//     实际走 sub_10007900（UI 布局解析器）"TEXT" 关键字分支！
+//     x64dbg 实证：0x13BF7948（RVA 0x7948）断点命中（用户确认「exe 未完全启动」），
+//     上下文 = mov edx,0x13D60478("TEXT"); call 0x13CE1C1A(关键字比较);
+//     jz 下一分支 → lea eax,[ebp+0x14](TEXT 值); lea edi,[esi+0x138];
+//     push eax; mov ecx,edi; call 0x13CE9CCA(sub_100F9CCA)！
+//   ◆ 栈平衡修正：ts_wide 分支必须模拟原调用语义（push a2 → call → ret 0x04 清 a2）：
+//     call sub_100FFD90 后 add esp,4 清 a2 + ret 返回——v21 的 push ret+jmp 会导致
+//     返回后栈差 4 字节（a2 未清）→ 调用者栈错位。
+//   ◆ 判定机制（同前）：教程 TEXT 首字符全角空格 0x3000（LE 00 30）→
+//     [文本+1]&0x40 = 0 → 判窄 → 深拷贝窄 strlen 截断「一」(00 4E)。
+//     v22 handler 检测 UTF-16 宽特征（偶数偏移 0x00 + 下字节非 0）→
+//     强制宽路径 sub_100FFD90（引用共享不截断）。
 // ═══════════════════════════════════════════════════════════════════════
-#define GW_TEXT_STORE_CALL_RVA 0x8E20Cu   // sub_1008E1C0 内 call sub_100F9CCA 调用点
-#define GW_TEXT_STORE_RET_RVA  0x8E211u   // call 返回地址
+#define GW_TEXT_STORE_CALL_RVA 0x7948u   // sub_10007900 (UI解析器) "TEXT" 关键字分支 call sub_100F9CCA
+#define GW_TEXT_STORE_RET_RVA  0x794Du   // call 返回地址
 #define GW_TEXT_STORE_F9CCA_RVA 0xF9CCAu  // sub_100F9CCA 原函数（窄路径 fallback）
 #define GW_TEXT_STORE_FFD90_RVA 0xFFD90u  // sub_100FFD90 宽路径（引用共享）
 static BYTE  g_origTextStore[5];
@@ -1862,15 +1866,16 @@ static void __declspec(naked) cjk_text_store_impl(void)
         jmp  ts_scan
     ts_wide:
         ; ★ 强制宽路径：sub_100FFD90(this+4, a2+4)（引用共享，不截断）
+        ; 进入 handler 时 [esp]=a2（调用点 push 的），ecx=this
         popad
-        ; 恢复后 [esp]=a2（原调用点压的）, ecx=this
+        ; 恢复后 [esp]=a2, ecx=this
         mov  eax, [esp]                 ; eax = a2
         add  eax, 4                     ; eax = a2+4
-        push dword ptr [g_textStoreRetVA]   ; [esp]=ret, [esp+4]=a2
-        mov  [esp + 4], eax             ; [esp+4]=a2+4（覆盖原 a2）
+        push eax                        ; [esp]=a2+4（sub_100FFD90 参数）, [esp+4]=a2
         lea  ecx, [ecx + 4]             ; ecx = this+4
-        jmp  dword ptr [g_textStoreFFD90]
-        ; sub_100FFD90 ret 0x04 弹 a2+4 → 返回 0x0D66E211 → 栈平衡 ✓
+        call dword ptr [g_textStoreFFD90]   ; call sub_100FFD90（ret 0x04 清 a2+4 返回）
+        add  esp, 4                     ; ★ 清 a2（原调用点 push 的）→ 栈平衡
+        ret                             ; 返回调用者（等效 sub_100F9CCA 的 ret 0x04 清 a2）
     ts_orig:
         popad
         ; 恢复后 [esp]=a2, ecx=this
@@ -1885,7 +1890,7 @@ static int install_text_store_hook(void)
     BYTE* entry;
     DWORD oldProt;
     HMODULE hGw;
-    static const BYTE expect[5] = {0xE8, 0xB9, 0xBA, 0x06, 0x00};
+    static const BYTE expect[5] = {0xE8, 0x7D, 0x23, 0x0F, 0x00};
     if (g_hookedTextStore) return 1;
     hGw = GetModuleHandleA("GameWorld.dll");
     if (!hGw) return 0;
