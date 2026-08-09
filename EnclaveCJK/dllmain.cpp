@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q9"
+#define CJK_VERSION "v23q9.2"
 
 #include "pch.h"
 
@@ -4258,7 +4258,6 @@ static void h5_diag(DWORD retRva, int found, int slen, const BYTE* data)
     char buf[340];
     char* p;
     int i, hasHi = 0;
-    if (InterlockedIncrement(&s_c) > 400) return;
     p = buf;
     p += wsprintfA(p, "[H5] ret=%05X len=%3d strlen=%3d %-7s | ", retRva, found, slen,
                    found > 0 ? "RESCUED" : "miss");
@@ -4271,7 +4270,10 @@ static void h5_diag(DWORD retRva, int found, int slen, const BYTE* data)
         }
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { }
+    // ★ v23q9.2：先过滤纯 ASCII（SN 等噪声），【再】计数——之前先计数，
+    //   前 400 次被加载画面/纯 ASCII 占满，中文字幕从未落盘（CJK_h5_log.txt 不存在）
     if (!hasHi) return;
+    if (InterlockedIncrement(&s_c) > 400) return;
     p += wsprintfA(p, "\r\n");
     // ★ v23q9：独立文件（diag_write 的 160 条总配额被 SN 构造噪声占满，H5 从未落盘）
     HANDLE h = CreateFileA("CJK_h5_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
@@ -4321,7 +4323,11 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
     {
         if (slen_wide > 0 && slen_wide <= LEN_MAXB && slen_wide >= slen)
             return slen_wide;
-        return (len > slen && len <= LEN_MAXB) ? len : 0;
+        // ★ v23q9.2：不再 fallback g_len（len>slen 分支）——宽扫描已覆盖区间内全部正常情况
+        //   （低字节 0x00 汉字 slen_wide>slen、纯高字节 slen_wide==slen 均接管），
+        //   g_len 在此完全多余且是竞态源（对象池复用旧长度+无锁 → 残余 @/（）越界）。
+        //   仅超长文本（>249B，罕见）落此分支 → 返回 0 用原 strlen（宁缺不越界）。
+        return 0;
     }
     // v16n：区间外（教程/UI 绘制）只记录不接管 —— 防止误改非字幕文本长度
     return 0;
