@@ -1948,57 +1948,85 @@ static BYTE   g_origEFCBA[7];
 static BYTE*  g_efcbaTramp = NULL;
 static volatile LONG g_inProbe = 0;
 
-// probe_log_c：扫描文本前 128 WORD，命中 CJK → 写 CJK_probe_log.txt（去重限流）
+// probe_log_c：扫描文本，命中【真 UTF-16 中文文本】→ 写 CJK_probe_log.txt（去重限流）
+// ★ v23c 修复（崩溃根因）：
+//   sub_100F9CCA 有大量【资源加载】调用点（wave_0.xwc/GameClasses.dll/cam\ping 等
+//   窄 ANSI 路径），这些调用 [a2+4] 不是合法 UTF-16 文本指针（窄字节对按 WORD 读
+//   恰好偶中 CJK 区间）→ 原探针扫描时访问违例崩溃（dump 实证 Eip=RVA 0x3F71
+//   probe_log_c 扫描循环 + Ebp=0x3A475758 垃圾指针）。
+//   ① 判定收紧：前 32 WORD 中【≥3 个 CJK 汉字/标点】才算真中文文本（窄路径随机
+//     字节对难凑 3 个）→ 过滤误判刷爆
+//   ② SEH 保护：整个扫描+格式化用 __try/__except 包住 → 读坏指针直接跳过，永不崩溃
 // cdecl 参数：probe_log_c(const char* tag, DWORD caller, const BYTE* txt)
 static void probe_log_c(const char* tag, DWORD caller, const BYTE* txt)
 {
     char  buf[640];
     char* p = buf;
-    int   i, found = 0, sigMatch = 0;
+    int   i, cjk = 0, sigMatch = 0;
     WORD  sig[4];
     static DWORD s_lastCaller = 0;
     static WORD  s_sig[4] = {0};
 
     if (!txt) return;
-    // 扫描前 128 WORD：CJK 汉字/标点 或 低字节0x00+高字节非0（UTF-16 宽特征）
-    for (i = 0; i < 128; i++)
+    __try
     {
-        WORD w = *(WORD*)(txt + i * 2);
-        if (w == 0) break;
-        if ((w >= 0x4E00 && w <= 0x9FFF) || (w >= 0x3000 && w <= 0x30FF) ||
-            ((w & 0xFF) == 0 && (w >> 8) != 0)) { found = 1; break; }
-    }
-    if (!found) return;
-    // 去重：caller + 前 4 WORD 与上次相同 → 跳过（防高频重复刷爆）
-    for (i = 0; i < 4; i++) sig[i] = *(WORD*)(txt + i * 2);
-    if (caller == s_lastCaller && sig[0] == s_sig[0] && sig[1] == s_sig[1] &&
-        sig[2] == s_sig[2] && sig[3] == s_sig[3]) return;
-    s_lastCaller = caller;
-    for (i = 0; i < 4; i++) s_sig[i] = sig[i];
+        // 统计前 32 WORD 中 CJK 汉字/标点数量（真 UTF-16 中文文本特征）
+        for (i = 0; i < 32; i++)
+        {
+            WORD w = *(WORD*)(txt + i * 2);
+            if (w == 0) break;
+            if ((w >= 0x4E00 && w <= 0x9FFF) || (w >= 0x3000 && w <= 0x30FF)) cjk++;
+        }
+        if (cjk < 3) return;   // 非中文文本（窄路径/资源名/短文本）→ 不记录
+        // 去重：caller + 前 4 WORD 与上次相同 → 跳过（防高频重复刷爆）
+        for (i = 0; i < 4; i++) sig[i] = *(WORD*)(txt + i * 2);
+        if (caller == s_lastCaller && sig[0] == s_sig[0] && sig[1] == s_sig[1] &&
+            sig[2] == s_sig[2] && sig[3] == s_sig[3]) return;
+        s_lastCaller = caller;
+        for (i = 0; i < 4; i++) s_sig[i] = sig[i];
 
-    p += wsprintfA(p, "[%s] caller=%08X 文本前32WORD: ", tag, caller);
-    for (i = 0; i < 32; i++)
-    {
-        WORD w = *(WORD*)(txt + i * 2);
-        if (w == 0) break;
-        if (w >= 0x20 && w <= 0x7E) p += wsprintfA(p, "%c", (char)w);
-        else if ((w >= 0x4E00 && w <= 0x9FFF) || (w >= 0x3000 && w <= 0x30FF))
-            p += wsprintfA(p, "[%04X]", w);
-        else p += wsprintfA(p, "<%02X%02X>", w & 0xFF, w >> 8);
+        p += wsprintfA(p, "[%s] caller=%08X 文本前32WORD: ", tag, caller);
+        for (i = 0; i < 32; i++)
+        {
+            WORD w = *(WORD*)(txt + i * 2);
+            if (w == 0) break;
+            if (w >= 0x20 && w <= 0x7E) p += wsprintfA(p, "%c", (char)w);
+            else if ((w >= 0x4E00 && w <= 0x9FFF) || (w >= 0x3000 && w <= 0x30FF))
+                p += wsprintfA(p, "[%04X]", w);
+            else p += wsprintfA(p, "<%02X%02X>", w & 0xFF, w >> 8);
+        }
+        p += wsprintfA(p, "\n");
+        HANDLE h = CreateFileA("CJK_probe_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                               NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h == INVALID_HANDLE_VALUE) return;
+        SetFilePointer(h, 0, NULL, FILE_END);
+        DWORD written;
+        WriteFile(h, buf, (DWORD)(p - buf), &written, NULL);
+        CloseHandle(h);
     }
-    p += wsprintfA(p, "\n");
-    HANDLE h = CreateFileA("CJK_probe_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
-                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) return;
-    SetFilePointer(h, 0, NULL, FILE_END);
-    DWORD written;
-    WriteFile(h, buf, (DWORD)(p - buf), &written, NULL);
-    CloseHandle(h);
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        // 非法指针/访问违例 → 静默跳过（探针永不崩溃）
+    }
 }
 
 // 探针 tag 字符串（naked asm push offset 引用，必须在使用前声明）
 static const char probe_tag_f9cca[] = "F9CCA";
 static const char probe_tag_efcba[] = "EFCBA";
+
+// ★ v23c：naked 里直接读 [a2+4] 也可能崩（a2 本身非法指针时读取即 AV）——
+//   统一用 C 包装：指针解引用全部放进 __try/__except，探针永不崩溃。
+static void probe_a2_c(const char* tag, DWORD caller, DWORD a2)
+{
+    __try
+    {
+        const BYTE* txt = a2 ? *(const BYTE**)(a2 + 4) : NULL;
+        probe_log_c(tag, caller, txt);
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+}
 
 static void __declspec(naked) cjk_f9cca_probe(void)
 {
@@ -2012,16 +2040,11 @@ static void __declspec(naked) cjk_f9cca_probe(void)
         je   f9_skip
         mov  byte ptr [g_inProbe], 1
         mov  eax, [esp + 0x24]          ; a2
-        test eax, eax
-        jz   f9_done
-        mov  esi, [eax + 4]             ; 文本指针 = a2->+4
-        test esi, esi
-        jz   f9_done
         mov  ebx, [esp + 0x20]          ; caller
-        push esi                        ; 参数3: txt
+        push eax                        ; 参数3: a2
         push ebx                        ; 参数2: caller
         push offset probe_tag_f9cca     ; 参数1: tag
-        call probe_log_c
+        call probe_a2_c
         add  esp, 12
     f9_done:
         mov  byte ptr [g_inProbe], 0
@@ -2041,16 +2064,11 @@ static void __declspec(naked) cjk_efcba_probe(void)
         je   ef_skip
         mov  byte ptr [g_inProbe], 1
         mov  eax, [esp + 0x24]          ; arg_0
-        test eax, eax
-        jz   ef_done
-        mov  esi, [eax + 4]             ; 文本指针 = arg_0->+4
-        test esi, esi
-        jz   ef_done
         mov  ebx, [esp + 0x20]          ; caller
-        push esi
-        push ebx
-        push offset probe_tag_efcba
-        call probe_log_c
+        push eax                        ; 参数3: a2
+        push ebx                        ; 参数2: caller
+        push offset probe_tag_efcba     ; 参数1: tag
+        call probe_a2_c
         add  esp, 12
     ef_done:
         mov  byte ptr [g_inProbe], 0
