@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q17.2"
+#define CJK_VERSION "v23q18"
 
 #include "pch.h"
 
@@ -2047,14 +2047,16 @@ static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
         // ★ v23q16：Trie 匹配（字典已由 wait_thread 主动加载）——命中记录 + 无终止补终止符
         if (g_trieState == 2)
         {
-            for (int k = 0; k <= 4; k++)            // 试 5 个偏移（窄前缀对齐）
+            // ★ v23q18：k 范围扩到 16——v23q17.2 实证命中全是 k=1 短文本（≤24B），
+            //   长文本（"看来…"48B/破折号句32B）未命中——可能前缀 >4 WORD
+            for (int k = 0; k <= 16; k++)           // 试 17 个偏移（窄前缀/§Z 前缀对齐）
             {
                 DWORD L = trie_match_at(w, k, 200);
                 if (L > 0 && L < 504)      // 252 WORD 上限（不依赖 LEN_MAXB——定义在后方）
                 {
                     LONG m = InterlockedIncrement(&s_match);
                     if (m <= 80)
-                        log_msg("[CJK] v23q17 F9CCA Trie命中 %uB(k=%d) @ %08X term=%d n=%d\n",
+                        log_msg("[CJK] v23q18 F9CCA Trie命中 %uB(k=%d) @ %08X term=%d n=%d\n",
                                 L, k, w, hasTerm, n);
                     // 无终止 → 尝试在值末尾补 0x0000（VirtualProtect+SEH；共享缓冲风险
                     //   ——值后若紧跟其他 TEXT 会截断，仅当 term=0 且命中才动）
@@ -2071,6 +2073,33 @@ static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
                         }
                     }
                     break;
+                }
+            }
+        }
+
+        // ★ v23q18 特殊诊断：破折号（0x2014）或长文本（n>20）无条件记录（独立文件，
+        //   不受 150 条配额影响）——看"用我的——"/"看来…"运行时实际字节形态
+        {
+            int hasDash = 0;
+            for (int i = 0; i < n && i < 64; i++) if (w[i] == 0x2014) { hasDash = 1; break; }
+            if (hasDash || n > 20)
+            {
+                static volatile LONG s_sp = 0;
+                LONG p = InterlockedIncrement(&s_sp);
+                if (p <= 80)
+                {
+                    char sb[520]; char* q = sb;
+                    q += wsprintfA(q, "[F9SP %ld] a2=%08X p=%08X n=%d term=%d dash=%d | ", p, a2, w, n, hasTerm, hasDash);
+                    for (int i = 0; i < 40 && i < n + 1; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
+                    q += wsprintfA(q, "\n");
+                    HANDLE h = CreateFileA("CJK_f9special_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                    if (h != INVALID_HANDLE_VALUE)
+                    {
+                        SetFilePointer(h, 0, NULL, FILE_END);
+                        DWORD wn; WriteFile(h, sb, (DWORD)(q - sb), &wn, NULL);
+                        CloseHandle(h);
+                    }
                 }
             }
         }
@@ -4716,7 +4745,7 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
             __try
             {
                 const WORD* t = (const WORD*)data;
-                for (int k = 0; k <= 4; k++)           // 试 5 个偏移（窄前缀 §Z22 对齐）
+                for (int k = 0; k <= 16; k++)          // ★ v23q18：k 范围扩到 16（长前缀）
                 {
                     DWORD L = trie_match_at(t, k, 200);
                     if (L > 0 && L <= LEN_MAXB)
