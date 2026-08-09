@@ -2156,7 +2156,11 @@ static int install_probe_hook(void)
 // ═══════════════════════════════════════════════════════════════════════
 #define IAT_EXE_CREATEFILEA_RVA 0x770DCu  // Enclave.exe KERNEL32.CreateFileA IAT 槽
 #define IAT_EXE_READFILE_RVA    0x770B4u  // Enclave.exe KERNEL32.ReadFile IAT 槽
+#define IAT_GW_CREATEFILEA_RVA  0x13E0A8u // GameWorld KERNEL32.CreateFileA IAT 槽（DIALOGUES 加载器用）
+#define IAT_GW_READFILE_RVA     0x13E07Cu // GameWorld KERNEL32.ReadFile IAT 槽
 static BOOL   (WINAPI* g_origExeReadFile)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+static BOOL   (WINAPI* g_origGwReadFile)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+static HANDLE(WINAPI* g_origGwCreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 static volatile LONG g_inFileProbe = 0;
 
 static void file_probe_log(const char* name, DWORD caller)
@@ -2209,6 +2213,34 @@ static BOOL WINAPI my_ExeReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOf
     return g_origExeReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
 }
 
+// ★ v23e：GameWorld 的 CreateFileA 也探（DIALOGUES 加载器 sub_1008D500 打开 LM01.xrg 走这里）
+static void __declspec(naked) my_GwCreateFileA(void)
+{
+    __asm
+    {
+        pushad
+        cmp  byte ptr [g_inFileProbe], 1
+        je   gf_skip
+        mov  byte ptr [g_inFileProbe], 1
+        mov  eax, [esp + 0x24]          ; lpFileName
+        mov  ebx, [esp + 0x20]          ; caller
+        push eax
+        push ebx
+        call file_probe_log
+        add  esp, 8
+        mov  byte ptr [g_inFileProbe], 0
+    gf_skip:
+        popad
+        jmp  dword ptr [g_origGwCreateFileA]
+    }
+}
+
+static BOOL WINAPI my_GwReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead,
+                                 LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped)
+{
+    return g_origGwReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
+}
+
 // 安装：校验 IAT 槽现值 = kernel32 导出地址后替换
 static int install_file_probe_hook(void)
 {
@@ -2259,6 +2291,48 @@ static int install_file_probe_hook(void)
         log_msg("[CJK] v23d EXE ReadFile IAT hook：%08X -> %08X\n", (DWORD)slot, (DWORD)my_ExeReadFile);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+    // ★ v23e：GameWorld CreateFileA/ReadFile（DIALOGUES 加载器 sub_1008D500 打开 LM01.xrg 走这里）
+    if (g_gwBase)
+    {
+        slot = (DWORD*)(g_gwBase + IAT_GW_CREATEFILEA_RVA);
+        __try
+        {
+            cur = *slot;
+            if (cur != (DWORD)GetProcAddress(hK32, "CreateFileA"))
+            {
+                log_msg("[CJK] v23e GW CreateFileA 槽校验失败：%08X != %08X，跳过\n",
+                        cur, (DWORD)GetProcAddress(hK32, "CreateFileA"));
+                return 0;
+            }
+            g_origGwCreateFileA = (HANDLE(WINAPI*)(LPCSTR,DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,DWORD,HANDLE))cur;
+            VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
+            *slot = (DWORD)my_GwCreateFileA;
+            VirtualProtect(slot, 4, oldProt, &oldProt);
+            log_msg("[CJK] v23e GW CreateFileA IAT hook：%08X -> %08X\n",
+                    (DWORD)slot, (DWORD)my_GwCreateFileA);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+        slot = (DWORD*)(g_gwBase + IAT_GW_READFILE_RVA);
+        __try
+        {
+            cur = *slot;
+            if (cur != (DWORD)GetProcAddress(hK32, "ReadFile"))
+            {
+                log_msg("[CJK] v23e GW ReadFile 槽校验失败：%08X != %08X，跳过\n",
+                        cur, (DWORD)GetProcAddress(hK32, "ReadFile"));
+                return 0;
+            }
+            g_origGwReadFile = (BOOL(WINAPI*)(HANDLE,LPVOID,DWORD,LPDWORD,LPOVERLAPPED))cur;
+            VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
+            *slot = (DWORD)my_GwReadFile;
+            VirtualProtect(slot, 4, oldProt, &oldProt);
+            log_msg("[CJK] v23e GW ReadFile IAT hook：%08X -> %08X\n",
+                    (DWORD)slot, (DWORD)my_GwReadFile);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+    }
 
     return 1;
 }
