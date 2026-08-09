@@ -3242,12 +3242,17 @@ static void tfstr_diag(DWORD retRva, const WORD* w, int n, int strong, int hit)
 // ────────────────────────────────────────────────────────────────────────
 #define EXE_KEYTABLE_RVA 0x8B830u   // 物理键名表（IDA: 0x48B830 = 0x400000 + 0x8B830）
 
-// 逻辑/教程键名 → 物理键显示名（查 EXE 物理键名表，SEH 保护，失败返回 NULL）
+// 逻辑/教程键名 → 物理键显示名（查 EXE 物理键名表）
+// ★ v23n：去掉 __try/__except，纯防御遍历【保证绝不触发异常】——
+//   v23m 用 SEH + 无限 lstrlenA 扫描，读越界触发 AV → ntdll RtlpLookupFunctionEntry
+//   （SEH 分发查函数表）二次崩溃（dump 实证：C0000005 @ ntdll RVA 0x502F8 mov ecx,[ecx]）
+//   现在：字符串限长 64、跳过 0 限 8 DWORD、条目 ≤ 64
+//   ⇒ 最多推进 64×(4+64+64+64+32)≈14KB，在 EXE .data（0x8B830→0xAF1B8）内，绝不越界
 static const char* key_display_lookup(const char* key)
 {
     char logical[80];
     BYTE* p;
-    int   i;
+    int   i, z;
 
     if (!g_exeBase || !key || !key[0]) return NULL;
     if (strncmp(key, "TUTORIAL_", 9) == 0)
@@ -3258,22 +3263,23 @@ static const char* key_display_lookup(const char* key)
         return NULL;
 
     p = (BYTE*)(g_exeBase + EXE_KEYTABLE_RVA);
-    __try
+    for (i = 0; i < 64; i++)
     {
-        for (i = 0; i < 256; i++)
+        for (z = 0; z < 8 && *(volatile DWORD*)p == 0; z++) p += 4;  // 跳 0（限量）
+        if (*(volatile DWORD*)p != 0x22) return NULL;                // 非 '"' → 表尾/异常
+        p += 4;
         {
-            while (*(DWORD*)p == 0) p += 4;        // 跳过前导/对齐 0
-            if (*(DWORD*)p != 0x22) break;         // 非 '"' 开头 → 表尾/异常
-            p += 4;
-            {
-                char* disp  = (char*)p; p += lstrlenA(disp) + 1;
-                char* logic = (char*)p; p += lstrlenA(logic) + 1;
-                char* unbind = (char*)p; p += lstrlenA(unbind) + 1;
-                if (lstrcmpiA(logic, logical) == 0) return disp;
-            }
+            int dl = 0; while (dl < 64 && p[dl]) dl++;               // 限长显示名
+            const char* disp  = (const char*)p;
+            p += dl + 1;
+            int lg = 0; while (lg < 64 && p[lg]) lg++;               // 限长逻辑键名
+            const char* logic = (const char*)p;
+            if (lstrcmpiA(logic, logical) == 0) return disp;
+            p += lg + 1;
+            int ub = 0; while (ub < 64 && p[ub]) ub++;               // 限长 unbind 前缀
+            p += ub + 1;
         }
     }
-    __except (EXCEPTION_EXECUTE_HANDLER) { }
     return NULL;
 }
 
@@ -3568,6 +3574,8 @@ static int __cdecl tfstr_cjk_wide(void* obj, const void* text, DWORD retRva)
         {
             WORD* dst = (WORD*)((BYTE*)obj + 4);        // 数据【内联】在 +4
             // ★ v23m：检测 §L 宏（A7 00 4C 00）→ 预展开为全角键名（原子完成）
+            //   ★ v23n：__try 内【绝不 return】（SEH 局部展开在 naked 调用上下文有风险），
+            //     只设 expanded 标志，统一走函数尾部 return hit —— 与 v23k 控制流一致。
             for (i = 0; i < n - 1; i++)
                 if (w[i] == 0x00A7 && w[i + 1] == 0x004C) { hasSL = 1; break; }
             if (hasSL)
@@ -3581,17 +3589,18 @@ static int __cdecl tfstr_cjk_wide(void* obj, const void* text, DWORD retRva)
                     *(DWORD*)obj = g_gwBase + TFSTR_VTABLE_RVA;
                     len_put(obj, en * 2);               // 登记展开后字节长度
                     expanded = 1;
-                    tfstr_sl_diag(retRva, w, n, hasSL, expanded);
-                    return 1;                           // 预展开版构造完成
                 }
             }
-            for (i = 0; i < n; i++) dst[i] = w[i];      // 按 WORD 搬，0x00 不再是边界
-            dst[n] = 0;                                 // 宽终止 00 00
-            *(DWORD*)obj = g_gwBase + TFSTR_VTABLE_RVA; // TFStr<252> vtable
-            len_put(obj, n * 2);                        // ★ 登记真实字节长度
+            if (!expanded)
+            {
+                for (i = 0; i < n; i++) dst[i] = w[i];  // 按 WORD 搬，0x00 不再是边界
+                dst[n] = 0;                             // 宽终止 00 00
+                *(DWORD*)obj = g_gwBase + TFSTR_VTABLE_RVA; // TFStr<252> vtable
+                len_put(obj, n * 2);                    // ★ 登记真实字节长度
+            }
         }
         __except (EXCEPTION_EXECUTE_HANDLER) { hit = 0; }
-        if (!expanded) tfstr_sl_diag(retRva, w, n, hasSL, 0);   // v23m 诊断
+        if (hit) tfstr_sl_diag(retRva, w, n, hasSL, expanded);   // v23m 诊断
     }
     else
     {
