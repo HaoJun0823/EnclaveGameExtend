@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q23"
+#define CJK_VERSION "v23q23.1"
 
 #include "pch.h"
 
@@ -5314,17 +5314,19 @@ static BOOL install_hook(void)
 //   EnclaveCJK 加载后【运行时】把两处 jne 改 nop（VirtualProtect+核验 expect），
 //   效果与磁盘补丁完全一致，且磁盘文件 100% 纯净可过 Steam 校验。
 // ═══════════════════════════════════════════════════════════════════════
-#define GW_F1A55_RVA 0xF1A55u    // 第一处 jne（75 07）
-#define GW_F1A6A_RVA 0xF1A6Au    // 第二处 jne（75 04）
+#define GW_F1A57_RVA 0xF1A57u    // 第一处 jne（75 07）——0xF1A54 test ch,0xa0（f6 c5 a0）后 jne 在 0xF1A57
+#define GW_F1A6C_RVA 0xF1A6Cu    // 第二处 jne（75 04）——0xF1A69 test ch,0xa0 后 jne 在 0xF1A6C
 
 static void patch_gw_cjk_jne(void)
 {
     __try
     {
         if (!g_gwBase) return;
-        BYTE* p1 = (BYTE*)(g_gwBase + GW_F1A55_RVA);
-        BYTE* p2 = (BYTE*)(g_gwBase + GW_F1A6A_RVA);
+        BYTE* p1 = (BYTE*)(g_gwBase + GW_F1A57_RVA);
+        BYTE* p2 = (BYTE*)(g_gwBase + GW_F1A6C_RVA);
         // 核验 Steam 原版 jne（75 07 / 75 04）；已 nop 或非预期 → 跳过（幂等安全）
+        // ★ v23q23.1：偏移修正——之前用 0xF1A55/0xF1A6A 读到了 test ch,0xa0 的字节
+        //   （0xF1A55=c5）→ 核验失败 → 补丁从未生效 → GameWorld 保持 jne → 中文空白！
         if (p1[0] != 0x75 || p1[1] != 0x07 || p2[0] != 0x75 || p2[1] != 0x04) return;
         DWORD old;
         if (VirtualProtect(p1, 2, PAGE_EXECUTE_READWRITE, &old))
