@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q16"
+#define CJK_VERSION "v23q17"
 
 #include "pch.h"
 
@@ -2031,10 +2031,15 @@ static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
         if (!a2 || a2 < 0x10000) return;
         WORD* w = *(WORD**)(a2 + 4);
         if (!w || (DWORD)w < 0x10000) return;
-        int n = 0, hasTerm = 0, hasHi = 0;
+        int n = 0, hasTerm = 0, hasCjk = 0;
         while (n < 252 && w[n])
         {
-            if (w[n] > 0x7F) hasHi = 1;
+            WORD c = w[n];
+            BYTE lo = (BYTE)c;
+            // ★ v23q17：hasHi(>0x7F) 对窄 ASCII 无效（字节对按 WORD 读必 >0x7F）——
+            //   strong 判据（低字节不可打印 + CJK 区间）或全角/CJK 标点才算中文
+            if (((lo < 0x20 || lo > 0x7E) && c >= 0x4E00 && c <= 0x9FFF) ||
+                (c >= 0xFF00 && c <= 0xFFEF) || (c >= 0x3000 && c <= 0x303F)) hasCjk = 1;
             n++;
         }
         if (n < 252 && w[n] == 0) hasTerm = 1;      // 252 内找到 0x0000 终止
@@ -2049,17 +2054,20 @@ static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
                 {
                     LONG m = InterlockedIncrement(&s_match);
                     if (m <= 80)
-                        log_msg("[CJK] v23q16 F9CCA Trie命中 %uB @ %08X term=%d n=%d\n",
-                                L, w, hasTerm, n);
+                        log_msg("[CJK] v23q17 F9CCA Trie命中 %uB(k=%d) @ %08X term=%d n=%d\n",
+                                L, k, w, hasTerm, n);
                     // 无终止 → 尝试在值末尾补 0x0000（VirtualProtect+SEH；共享缓冲风险
                     //   ——值后若紧跟其他 TEXT 会截断，仅当 term=0 且命中才动）
-                    if (!hasTerm && n >= (int)(L / 2))
+                    // ★ v23q17：偏移 bug 修复——L 是【从 k 起】的匹配长度，
+                    //   值末尾 = w[k + L/2]（之前写 w[L/2] → 偏移丢失 → 文本被截断）
+                    if (!hasTerm && n >= k + (int)(L / 2))
                     {
                         DWORD old;
-                        if (VirtualProtect((BYTE*)w + L, 2, PAGE_READWRITE, &old))
+                        BYTE* tail = (BYTE*)w + (k + L / 2) * 2;
+                        if (VirtualProtect(tail, 2, PAGE_READWRITE, &old))
                         {
-                            ((WORD*)w)[L / 2] = 0;
-                            VirtualProtect((BYTE*)w + L, 2, old, &old);
+                            ((WORD*)w)[k + L / 2] = 0;
+                            VirtualProtect(tail, 2, old, &old);
                         }
                     }
                     break;
@@ -2067,8 +2075,8 @@ static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
             }
         }
 
-        // 诊断：只记录含中文的（v23q15 实证前 150 条被资源路径 ASCII 刷屏）
-        if (!hasHi) return;
+        // 诊断：只记录含中文的（v23q15 实证前 150 条被资源路径 ASCII 刷屏；hasCjk strong 判据）
+        if (!hasCjk) return;
         LONG c = InterlockedIncrement(&s_cnt);
         if (c > 150) return;
         char sb[480]; char* q = sb;
@@ -4515,10 +4523,10 @@ static void trie_log_entry(const char* src, const WORD* val, int vi, int isKey, 
         int kb2 = WideCharToMultiByte(CP_UTF8, 0, (LPCWSTR)key, ki, kb, 120, NULL, NULL);
         if (kb2 <= 0) return;
         kb[kb2] = 0;
-        n = wsprintfA(sb, "[TRIE] %s  KEY=%s  WORD=%d  值=\"%s\"\n", src, kb, vi, vbuf);
+        n = wsprintfA(sb, "[TRIE] %s  KEY=%s  WORD=%d  VAL=\"%s\"\n", src, kb, vi, vbuf);
     }
     else
-        n = wsprintfA(sb, "[TRIE] %s  WORD=%d  值=\"%s\"\n", src, vi, vbuf);
+        n = wsprintfA(sb, "[TRIE] %s  WORD=%d  VAL=\"%s\"\n", src, vi, vbuf);
     HANDLE h = CreateFileA("CJK_trie_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
                            NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h != INVALID_HANDLE_VALUE)
@@ -4553,14 +4561,17 @@ static void trie_load_xrg_file(const char* src, const char* path)
             if (j < nw && w[j] == 0x22)                                 // '"'
             {
                 j++;
-                WORD val[512]; int vi = 0, hasHi = 0;
+                WORD val[512]; int vi = 0, hasCjk = 0;
                 while (j < nw && vi < 511 && w[j] != 0x22)
                 {
                     if (w[j] == 0x000D || w[j] == 0x000A) break;
-                    if (w[j] > 0x7F) hasHi = 1;
+                    // ★ v23q17：hasHi(>0x7F) 对窄 ASCII 无效 → strong 判据
+                    WORD c = w[j]; BYTE lo = (BYTE)c;
+                    if (((lo < 0x20 || lo > 0x7E) && c >= 0x4E00 && c <= 0x9FFF) ||
+                        (c >= 0xFF00 && c <= 0xFFEF) || (c >= 0x3000 && c <= 0x303F)) hasCjk = 1;
                     val[vi++] = w[j++];
                 }
-                if (vi > 0 && hasHi)
+                if (vi > 0 && hasCjk)
                 {
                     trie_insert(val, vi);                 // 固化进 Trie 内存
                     trie_log_entry(src, val, vi, 0, NULL, 0);   // 审查日志
@@ -4708,7 +4719,15 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
                 for (int k = 0; k <= 4; k++)           // 试 5 个偏移（窄前缀 §Z22 对齐）
                 {
                     DWORD L = trie_match_at(t, k, 200);
-                    if (L > 0 && L <= LEN_MAXB) return (int)L;
+                    if (L > 0 && L <= LEN_MAXB)
+                    {
+                        // ★ v23q17：h5 命中日志（前 60 次）——确认 h5 是否触发 + 命中情况
+                        static volatile LONG s_h5 = 0;
+                        LONG m5 = InterlockedIncrement(&s_h5);
+                        if (m5 <= 60)
+                            log_msg("[CJK] v23q17 h5 Trie命中 %uB(k=%d) ret=%05X\n", L, k, retRva);
+                        return (int)L;
+                    }
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER) { }
