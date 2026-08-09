@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q12"
+#define CJK_VERSION "v23q13"
 
 #include "pch.h"
 
@@ -4333,6 +4333,117 @@ static void __declspec(naked) cjk_concat_fin_trampoline_impl(void)
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23q13：StringTable 字典 Trie（运行时加载，用户方案）
+//   cpp 内实现解析器：hook 首次调用时自动加载 Sbz1/registry/StringTable_Eng.txt
+//   （UTF-16LE，\t*KEY\t\t"value" 格式）→ 解析所有条目值 → 建 Trie
+//   （DLL 静态区持久化，只读）→ 绘制 hook（h5 0xF9B59）匹配文本 →
+//   命中返回精确字节长度。根治 g_len 竞态 @（字典只读无竞态）+
+//   无终止缓冲越界（Trie 走到叶子即停，读长度 = 匹配文本长度，有界）。
+//   值含 §p0/撇号等宏 → 原样 WORD 匹配（运行时已展开的缓冲匹配失败则回退现状，无害）。
+// ═══════════════════════════════════════════════════════════════════════
+#define TRIE_MAX_NODES 131072
+typedef struct TrieNode {
+    WORD  ch;          // 字符（根=0）
+    DWORD child;       // 第一个子节点索引（0=无）
+    DWORD next;        // 下一个兄弟节点索引（0=无）
+    DWORD len;         // 叶子：文本字节长度（WORD 数×2）；非叶子=0
+} TrieNode;
+static TrieNode g_trie[TRIE_MAX_NODES];
+static DWORD   g_trieCnt = 0;
+static volatile LONG g_trieState = 0;    // 0=未加载 1=加载中 2=完成 -1=失败
+
+static DWORD trie_find_child(DWORD node, WORD ch)
+{
+    for (DWORD c = g_trie[node].child; c; c = g_trie[c].next)
+        if (g_trie[c].ch == ch) return c;
+    return 0;
+}
+
+static void trie_insert(const WORD* s, int nw)
+{
+    DWORD node = 0;
+    for (int i = 0; i < nw; i++)
+    {
+        DWORD c = trie_find_child(node, s[i]);
+        if (!c)
+        {
+            if (g_trieCnt >= TRIE_MAX_NODES - 1) return;
+            c = ++g_trieCnt;
+            g_trie[c].ch = s[i];
+            g_trie[c].child = 0;
+            g_trie[c].next = g_trie[node].child;
+            g_trie[node].child = c;
+        }
+        node = c;
+    }
+    if (g_trie[node].len == 0) g_trie[node].len = (DWORD)nw * 2;   // 叶子记字节长度
+}
+
+// 从偏移 off 起逐 WORD 走 Trie，返回最长命中字节长度（0=未命中）
+static DWORD trie_match_at(const WORD* s, int off, int maxScan)
+{
+    DWORD node = 0, best = 0;
+    int i = off;
+    while (i < off + maxScan && s[i])
+    {
+        DWORD c = trie_find_child(node, s[i]);
+        if (!c) break;
+        node = c;
+        i++;
+        if (g_trie[node].len) best = g_trie[node].len;   // 记录最长叶子
+    }
+    return best;
+}
+
+static void trie_load(void)
+{
+    LONG st = InterlockedCompareExchange(&g_trieState, 1, 0);
+    if (st != 0) return;                     // 已在加载/完成/失败
+    g_trie[0].ch = 0; g_trie[0].child = 0; g_trie[0].next = 0; g_trie[0].len = 0;
+    g_trieCnt = 0;
+    HANDLE h = CreateFileA("Sbz1/registry/StringTable_Eng.txt", GENERIC_READ, FILE_SHARE_READ,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) { g_trieState = -1; return; }
+    DWORD sz = GetFileSize(h, NULL);
+    if (sz == INVALID_FILE_SIZE || sz > 8 * 1024 * 1024) { CloseHandle(h); g_trieState = -1; return; }
+    BYTE* buf = (BYTE*)VirtualAlloc(NULL, sz + 2, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!buf) { CloseHandle(h); g_trieState = -1; return; }
+    DWORD rd = 0;
+    if (!ReadFile(h, buf, sz, &rd, NULL)) { VirtualFree(buf, 0, MEM_RELEASE); CloseHandle(h); g_trieState = -1; return; }
+    CloseHandle(h);
+    int nw = (int)(rd / 2);
+    const WORD* w = (const WORD*)buf;
+    int i = 0;
+    while (i < nw - 1)
+    {
+        if (w[i] == 0x002A && i + 1 < nw && w[i + 1] != 0x002A)      // '*' 行首（非注释）
+        {
+            i++;
+            WORD key[96]; int ki = 0;
+            while (i < nw && ki < 95 &&
+                   ((w[i] >= 'A' && w[i] <= 'Z') || (w[i] >= 'a' && w[i] <= 'z') ||
+                    (w[i] >= '0' && w[i] <= '9') || w[i] == '_')) key[ki++] = w[i++];
+            while (i < nw && (w[i] == 0x09 || w[i] == 0x20)) i++;    // 跳空白到 '"'
+            if (i < nw && w[i] == 0x0022)                            // '"'
+            {
+                i++;
+                WORD val[400]; int vi = 0;
+                while (i < nw && vi < 399 && w[i] != 0x0022)
+                {
+                    if (w[i] == 0x000D || w[i] == 0x000A) break;     // 行内
+                    val[vi++] = w[i++];
+                }
+                if (vi > 0) trie_insert(val, vi);
+            }
+        }
+        i++;
+    }
+    VirtualFree(buf, 0, MEM_RELEASE);
+    g_trieState = 2;
+    log_msg("[CJK] v23q13 Trie 字典加载：%u 节点 / 文件 %u 字节\n", g_trieCnt, rd);
+}
+
 // ★ hook 5：0x100F9B59（绘制前拷贝 0x100F9AFA 内的 strlen）—— 最后一道关卡
 //
 //   反汇编现场：
@@ -4433,13 +4544,29 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
     //   时接管，纯高字节汉字文本仍走 g_len 竞态分支——本次改为区间内一律宽扫描优先）。
     if (retRva >= SUB_LO && retRva <= SUB_HI)
     {
+        // ★ v23q13：Trie 字典匹配（最高优先）——精确长度，根治 g_len 竞态 @ 与
+        //   无终止缓冲越界（走到叶子即停，读长度=匹配文本长度，SEH 兜底防越界）
+        trie_load();
+        if (g_trieState == 2)
+        {
+            __try
+            {
+                const WORD* t = (const WORD*)data;
+                for (int k = 0; k <= 4; k++)           // 试 5 个偏移（窄前缀 §Z22 对齐）
+                {
+                    DWORD L = trie_match_at(t, k, 200);
+                    if (L > 0 && L <= LEN_MAXB) return (int)L;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { }
+        }
         if (scan_ok && slen_wide > 0 && slen_wide <= LEN_MAXB && slen_wide >= slen)
             return slen_wide;
         // ★ v23q10：恢复 g_len fallback（v23q9.2 改返回 0 → 引擎原裸 strlen 无上限，
         //   无 0 终止缓冲越界 AV → ntdll+0x92971 异常分发二次崩，dump 56100 实证：
         //   过场台词"末尾有@@"，栈 MCCDyn→GameWorld 0xF9C92 TEXT 存储→MXR 视频）。
         //   g_len len 有界（≤LEN_MAXB）且为构造时登记的准确长度 → 不崩；
-        //   残余 @/括号（竞态旧长度 → 越界拷贝显示残留）概率小，后续 g_len 加锁根治。
+        //   残余 @/括号（竞态旧长度 → 越界拷贝显示残留）概率小，Trie 命中后彻底消除。
         return (len > slen && len <= LEN_MAXB) ? len : 0;
     }
     // v16n：区间外（教程/UI 绘制）只记录不接管 —— 防止误改非字幕文本长度
