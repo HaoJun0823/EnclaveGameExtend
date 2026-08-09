@@ -1,0 +1,31 @@
+Microsoft (R) COFF/PE Dumper Version 14.50.35725.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+
+Dump of file I:\SteamLibrary\steamapps\common\Enclave\MXR.dll
+
+File Type: DLL
+
+  Section contains the following exports for MXR.dll
+
+    00000000 characteristics
+    3E1F2233 time date stamp Sat Jan 11 03:42:43 2003
+        0.00 version
+           1 ordinal base
+           5 number of functions
+           5 number of names
+
+    ordinal hint RVA      name
+
+          1    0 0000162A DllEntryPoint
+          5    1 0000163A DllMain
+          2    2 0000C36A MRTC_DLLAttachProcess
+          3    3 0000368A MRTC_DLLDetachProcess
+          4    4 0000164A MRTC_GetClassContainer
+
+  Summary
+
+       3A000 .data
+       1E000 .rdata
+       10000 .reloc
+      112000 .text
