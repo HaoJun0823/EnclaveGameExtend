@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q11"
+#define CJK_VERSION "v23q12"
 
 #include "pch.h"
 
@@ -1995,14 +1995,98 @@ static int install_text_store_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// ★ v23（纯只读探针）：hook sub_100F9CCA / sub_100EFCBA 函数本体，
-//   批量 log「含 CJK 的文本」每次经过时的 caller + 文本 hex → CJK_probe_log.txt
-//
-//   ◆ 目的：定位「你拾起了一支火把」→「你拾起了」的真实截断路径。
-//     v22 hook 调用点 0x7948 无效 → 教程 TEXT 可能不走该调用点；
-//     改 hook **函数本体** = 拦截所有调用者（无论从哪个调用点进来），
-//     且【行为零修改】：扫描完直接 trampoline 执行原逻辑，绝不死循环。
-//
+// ★ v23q12 诊断：hook sub_100F9CCA（TEXT 存储本体 0xF9CCA）入口——
+//   用户实证"看来，他们连自己人也关押啊。" / "我会亲手把你撕成碎片，用我的——"
+//   两句过场台词【后面必定闪烁脏字符】。反汇编确认：
+//   sub_100F9CCA 宽路径（0xF9CEE）call sub_100FFD90 = **引用共享**（不拷贝）→
+//   宽文本（中文）存储后直接引用 .xrg 解析缓冲；若该缓冲值后无 0x0000 终止
+//   （紧跟 \r\n\t\t*TEXT...）→ 渲染按无终止读 → 越界显示脏字符（确定性，非竞态）。
+//   英文窄文本走 sub_100EFCBA 深拷贝（写终止符）→ 安全。
+//   诊断记录：a2 文本缓冲前 26 WORD + 是否有 0x0000 终止（term=1/0）+ 长度。
+// ═══════════════════════════════════════════════════════════════════════
+#define GW_F9CCA_BODY_RVA 0xF9CCAu
+static BYTE* g_f9ccaDiagTramp = NULL;
+static BOOL  g_hookedF9cca = FALSE;
+
+static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
+{
+    static volatile LONG s_cnt = 0;
+    __try
+    {
+        if (!a2 || a2 < 0x10000) return;
+        WORD* w = *(WORD**)(a2 + 4);
+        if (!w || (DWORD)w < 0x10000) return;
+        int n = 0, hasTerm = 0;
+        while (n < 252 && w[n]) n++;
+        if (n < 252 && w[n] == 0) hasTerm = 1;      // 252 内找到 0x0000 终止
+        LONG c = InterlockedIncrement(&s_cnt);
+        if (c > 150) return;
+        char sb[480]; char* q = sb;
+        q += wsprintfA(q, "[F9CCA %ld] a2=%08X p=%08X n=%d term=%d | ", c, a2, w, n, hasTerm);
+        for (int i = 0; i < 26 && i < n + 1; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
+        q += wsprintfA(q, "\n");
+        HANDLE h = CreateFileA("CJK_f9cca_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                               NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE)
+        {
+            SetFilePointer(h, 0, NULL, FILE_END);
+            DWORD wn; WriteFile(h, sb, (DWORD)(q - sb), &wn, NULL);
+            CloseHandle(h);
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+static void __declspec(naked) cjk_f9cca_impl(void)
+{
+    __asm
+    {
+        ; 进入：[esp]=ret, [esp+4]=a2(CStr*), ecx=this
+        pushad
+        mov  eax, [esp + 0x24]           ; a2（pushad 后 = 原 esp+4）
+        test eax, eax
+        jz   f9_skip
+        push eax
+        call cjk_f9cca_diag
+        add  esp, 4
+    f9_skip:
+        popad
+        jmp  dword ptr [g_f9ccaDiagTramp]    ; trampoline：原 5B + jmp 原函数+5
+    }
+}
+
+static int install_f9cca_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hGw;
+    static const BYTE expect[5] = {0x8B, 0x54, 0x24, 0x04, 0x56};  // mov edx,[esp+4]; push esi
+    if (g_hookedF9cca) return 1;
+    hGw = GetModuleHandleA("GameWorld.dll");
+    if (!hGw) return 0;
+    g_gwBase = (DWORD)hGw;
+    entry = (BYTE*)(g_gwBase + GW_F9CCA_BODY_RVA);
+    if (memcmp(entry, expect, 5) != 0)
+    {
+        log_msg("[CJK] v23q12 F9CCA 入口核验失败：%02X %02X %02X %02X %02X，跳过\n",
+                entry[0], entry[1], entry[2], entry[3], entry[4]);
+        return 0;
+    }
+    g_f9ccaDiagTramp = (BYTE*)VirtualAlloc(NULL, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_f9ccaDiagTramp) return 0;
+    memcpy(g_f9ccaDiagTramp, entry, 5);                      // 原 5B
+    g_f9ccaDiagTramp[5] = 0xE9;                              // jmp 原函数+5
+    *(DWORD*)(g_f9ccaDiagTramp + 6) = (DWORD)(entry + 5) - (DWORD)(g_f9ccaDiagTramp + 10);
+    if (!VirtualProtect(entry, 5, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_f9cca_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, 5, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, 5);
+    g_hookedF9cca = TRUE;
+    log_msg("[CJK] v23q12 F9CCA 本体 hook：%08X -> %08X（tramp=%08X）\n",
+            (DWORD)entry, (DWORD)cjk_f9cca_impl, (DWORD)g_f9ccaDiagTramp);
+    return 1;
+}
 //   ◆ sub_100F9CCA（RVA 0xF9CCA）头部 5B = `8B 54 24 04 56`
 //     （mov edx,[esp+4]; push esi）——完整指令，可安全覆盖 5B。
 //     进入：[esp]=返回地址(caller), [esp+4]=a2(CStr*), ecx=this
@@ -2019,7 +2103,7 @@ static int install_text_store_hook(void)
 #define GW_F9CCA_BODY_RVA  0xF9CCAu    // sub_100F9CCA 本体（TEXT 存储咽喉）
 #define GW_EFCBA_BODY_RVA  0xEFCBAu    // sub_100EFCBA 本体（窄路径深拷贝=截断点）
 static BYTE   g_origF9CCA[5];
-static BYTE*  g_f9ccaTramp = NULL;
+static BYTE*  g_f9ccaTramp = NULL;      // v23 探针（已禁用）——保留原名避免与新诊断变量冲突
 static BYTE   g_origEFCBA[7];
 static BYTE*  g_efcbaTramp = NULL;
 static volatile LONG g_inProbe = 0;
@@ -2126,7 +2210,7 @@ static void __declspec(naked) cjk_f9cca_probe(void)
         mov  byte ptr [g_inProbe], 0
     f9_skip:
         popad
-        jmp  dword ptr [g_f9ccaTramp]
+        jmp  dword ptr [g_f9ccaDiagTramp]
     }
 }
 
@@ -2164,7 +2248,7 @@ static int install_probe_hook(void)
     //   3 个 push 后 esp 已 -12，所以 mov edi 的 [esp+0Ch+arg_0] 编码为 8B 7C 24 10（esp+0x10）！
     //   （原写 0x0C 错误 → 核验失败探针没装上，日志证实：53 56 57 8B 7C 24 10）
     static const BYTE expect2[7] = {0x53, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x10};
-    if (g_f9ccaTramp && g_efcbaTramp) return 1;
+    if (g_f9ccaDiagTramp && g_efcbaTramp) return 1;
     if (!g_gwBase) return 0;
 
     // P1: sub_100F9CCA 本体（5B）
@@ -2175,14 +2259,14 @@ static int install_probe_hook(void)
                 e1[0], e1[1], e1[2], e1[3], e1[4]);
         return 0;
     }
-    g_f9ccaTramp = (BYTE*)VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    if (!g_f9ccaTramp) return 0;
+    g_f9ccaDiagTramp = (BYTE*)VirtualAlloc(NULL, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_f9ccaDiagTramp) return 0;
     memcpy(g_origF9CCA, e1, 5);
-    memcpy(g_f9ccaTramp, e1, 5);
-    g_f9ccaTramp[5] = 0xE9;
+    memcpy(g_f9ccaDiagTramp, e1, 5);
+    g_f9ccaDiagTramp[5] = 0xE9;
     // ★ v23b 修复：E9 在 tramp[5]，下一条指令 = tramp+10，rel 必须相对 tramp+10！
     //   （原写 -11 多减 1 → 跳回 e1+4 重复执行 push esi → 栈破坏 → Eip 跳栈崩溃 C0000005）
-    *(DWORD*)(g_f9ccaTramp + 6) = ((DWORD)e1 + 5) - ((DWORD)g_f9ccaTramp + 10);
+    *(DWORD*)(g_f9ccaDiagTramp + 6) = ((DWORD)e1 + 5) - ((DWORD)g_f9ccaDiagTramp + 10);
     VirtualProtect(e1, 5, PAGE_EXECUTE_READWRITE, &oldProt);
     e1[0] = 0xE9;
     *(DWORD*)(e1 + 1) = (DWORD)cjk_f9cca_probe - ((DWORD)e1 + 5);
@@ -4445,6 +4529,10 @@ static BOOL install_hook(void)
             //   （教程查表命中）。v21 handler 检测 UTF-16 宽文本 → 强制走宽路径
             //   （sub_100FFD90 引用共享，不截断）。
             install_text_store_hook();
+            // ★ v23q12 诊断：hook sub_100F9CCA 本体（TEXT 存储）——确认过场台词
+            //   （"看来…关押啊。" / "用我的——"）文本缓冲是否无 0x0000 终止
+            //   （宽文本引用共享 .xrg 解析缓冲 → 值后 \r\n → 渲染越界脏字符）
+            install_f9cca_hook();
             // ★ v23：只读探针（F9CCA/EFCBA 本体）——log 含 CJK 文本的必经路径
             // ★ v23o：**禁用**（崩溃修复）——探针 trampoline 在 GameWorld 动态区执行，
             //   54296 dump 实证 Eip 落在 GameWorld+0xF9AC2 非指令边界（探针区域附近）。
