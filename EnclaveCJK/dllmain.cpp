@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q15"
+#define CJK_VERSION "v23q16"
 
 #include "pch.h"
 
@@ -1995,6 +1995,21 @@ static int install_text_store_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23q13 Trie 字典（数据声明前置——cjk_f9cca_diag（v21 区）也引用，函数定义在 h5 区下方）
+// ═══════════════════════════════════════════════════════════════════════
+#define TRIE_MAX_NODES 131072
+typedef struct TrieNode {
+    WORD  ch;          // 字符（根=0）
+    DWORD child;       // 第一个子节点索引（0=无）
+    DWORD next;        // 下一个兄弟节点索引（0=无）
+    DWORD len;         // 叶子：文本字节长度（WORD 数×2）；非叶子=0
+} TrieNode;
+static TrieNode g_trie[TRIE_MAX_NODES];
+static DWORD   g_trieCnt = 0;
+static volatile LONG g_trieState = 0;    // 0=未加载 1=加载中 2=完成 -1=失败
+static DWORD trie_match_at(const WORD* s, int off, int maxScan);   // 定义在下方
+
 // ★ v23q12 诊断：hook sub_100F9CCA（TEXT 存储本体 0xF9CCA）入口——
 //   用户实证"看来，他们连自己人也关押啊。" / "我会亲手把你撕成碎片，用我的——"
 //   两句过场台词【后面必定闪烁脏字符】。反汇编确认：
@@ -2010,15 +2025,50 @@ static BOOL  g_hookedF9cca = FALSE;
 
 static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
 {
-    static volatile LONG s_cnt = 0;
+    static volatile LONG s_cnt = 0, s_match = 0;
     __try
     {
         if (!a2 || a2 < 0x10000) return;
         WORD* w = *(WORD**)(a2 + 4);
         if (!w || (DWORD)w < 0x10000) return;
-        int n = 0, hasTerm = 0;
-        while (n < 252 && w[n]) n++;
+        int n = 0, hasTerm = 0, hasHi = 0;
+        while (n < 252 && w[n])
+        {
+            if (w[n] > 0x7F) hasHi = 1;
+            n++;
+        }
         if (n < 252 && w[n] == 0) hasTerm = 1;      // 252 内找到 0x0000 终止
+
+        // ★ v23q16：Trie 匹配（字典已由 wait_thread 主动加载）——命中记录 + 无终止补终止符
+        if (g_trieState == 2)
+        {
+            for (int k = 0; k <= 4; k++)            // 试 5 个偏移（窄前缀对齐）
+            {
+                DWORD L = trie_match_at(w, k, 200);
+                if (L > 0 && L < 504)      // 252 WORD 上限（不依赖 LEN_MAXB——定义在后方）
+                {
+                    LONG m = InterlockedIncrement(&s_match);
+                    if (m <= 80)
+                        log_msg("[CJK] v23q16 F9CCA Trie命中 %uB @ %08X term=%d n=%d\n",
+                                L, w, hasTerm, n);
+                    // 无终止 → 尝试在值末尾补 0x0000（VirtualProtect+SEH；共享缓冲风险
+                    //   ——值后若紧跟其他 TEXT 会截断，仅当 term=0 且命中才动）
+                    if (!hasTerm && n >= (int)(L / 2))
+                    {
+                        DWORD old;
+                        if (VirtualProtect((BYTE*)w + L, 2, PAGE_READWRITE, &old))
+                        {
+                            ((WORD*)w)[L / 2] = 0;
+                            VirtualProtect((BYTE*)w + L, 2, old, &old);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 诊断：只记录含中文的（v23q15 实证前 150 条被资源路径 ASCII 刷屏）
+        if (!hasHi) return;
         LONG c = InterlockedIncrement(&s_cnt);
         if (c > 150) return;
         char sb[480]; char* q = sb;
@@ -4341,18 +4391,8 @@ static void __declspec(naked) cjk_concat_fin_trampoline_impl(void)
 //   命中返回精确字节长度。根治 g_len 竞态 @（字典只读无竞态）+
 //   无终止缓冲越界（Trie 走到叶子即停，读长度 = 匹配文本长度，有界）。
 //   值含 §p0/撇号等宏 → 原样 WORD 匹配（运行时已展开的缓冲匹配失败则回退现状，无害）。
+//   ★ 数据声明已前置到 v21 区（cjk_f9cca_diag 也引用）——此处只保留函数。
 // ═══════════════════════════════════════════════════════════════════════
-#define TRIE_MAX_NODES 131072
-typedef struct TrieNode {
-    WORD  ch;          // 字符（根=0）
-    DWORD child;       // 第一个子节点索引（0=无）
-    DWORD next;        // 下一个兄弟节点索引（0=无）
-    DWORD len;         // 叶子：文本字节长度（WORD 数×2）；非叶子=0
-} TrieNode;
-static TrieNode g_trie[TRIE_MAX_NODES];
-static DWORD   g_trieCnt = 0;
-static volatile LONG g_trieState = 0;    // 0=未加载 1=加载中 2=完成 -1=失败
-
 static DWORD trie_find_child(DWORD node, WORD ch)
 {
     for (DWORD c = g_trie[node].child; c; c = g_trie[c].next)
@@ -4975,6 +5015,9 @@ static BOOL install_hook(void)
 
 static DWORD WINAPI wait_thread(LPVOID)
 {
+    // ★ v23q16：主动加载 Trie 字典（不依赖 h5 触发——过场不走 h5，v23q15 审查日志
+    //   未生成实证）。wait_thread 在 DllMain 后创建，无 Loader Lock，文件 IO 安全。
+    trie_load();
     // 阶段 1：等 GameWorld 就绪，装主 hook（含 GW 3 槽 IAT）
     while (!install_hook())
         Sleep(100);
