@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q5"
+#define CJK_VERSION "v23q6"
 
 #include "pch.h"
 
@@ -712,6 +712,11 @@ static pfn_LocNarrow g_origLocGcNarrow = NULL;   // GameClasses.dll 那一份
 
 static int g_iatCount = 0;                       // 成功改写的 IAT 项数
 
+// ★ v23q6 前向声明：§L 预展开（定义在下方——SubstituteKeys 入口 hook 区）
+//   Localize_Str(wide) 入口预展开输入 src：§L → 键名全角写回 src 缓冲（只缩短、SEH、
+//   hasCjk 保护）→ 引擎展开时无 §L → 无逐字形写入 → 渲染竞态消失（教程提示路径）
+static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr);
+
 static void __declspec(noinline) __cdecl my_LocCStr(CStrVal src, WORD* out, int cap)
 {
     if (!g_origLocCStr) return;
@@ -733,6 +738,10 @@ static void __declspec(noinline) __cdecl my_LocNarrow(const char* src, WORD* out
 static void __declspec(noinline) __cdecl my_LocWide(const WORD* src, WORD* out, int cap)
 {
     if (!g_origLocWide) return;
+    // ★ v23q6：调用引擎前【预展开输入 src】——§L → 键名全角写回（原子）→
+    //   引擎展开时无 §L → 无逐字形写入 → 渲染并行读竞态消失（教程提示路径）
+    //   只处理含 §L + 中文的文本（hasCjk 保护），无 §L 零开销。
+    cjk_subst_expand_input((DWORD)src);
     g_origLocWide(src, out, cap);
     InterlockedIncrement((volatile LONG*)&g_postHits);
     safe_fullwidth_expanded((DWORD)out,
@@ -778,6 +787,9 @@ static void __declspec(noinline) __cdecl my_LocExeNarrow(const char* src, WORD* 
 static void __declspec(noinline) __cdecl my_LocExeWide(const WORD* src, WORD* out, int cap)
 {
     if (!g_origExeLocWide) return;
+    // ★ v23q6：EXE 的 Localize_Str(wide)——教程 HUD 直接调 EXE IAT 走这里！
+    //   预展开输入 src（§L → 键名全角写回）→ 引擎无 §L 可展 → 竞态消失
+    cjk_subst_expand_input((DWORD)src);
     g_origExeLocWide(src, out, cap);
     InterlockedIncrement((volatile LONG*)&g_postHits);
     safe_fullwidth_expanded((DWORD)out,
@@ -3045,6 +3057,26 @@ static DWORD g_substRetVA  = 0;         // 运行时 = g_msBase + MS_SUBST_RET_R
 static DWORD g_convOrigVA  = 0;         // 运行时 = g_msBase + MS_CONV_BODY_RVA（0x44EA 入口）
 static BOOL  g_hookedSubst = FALSE;
 
+// ★ v23q6：键名判别（C 函数）——解决 v23q5 第 3 字节判别的两难：
+//   'MOUSE1'(27 4D 4F..) 第 3 字节字母被误判汉字（乱码）；"大"(27 59 76..) 被误判键名（乱码）。
+//   正确判别：键名 = 'X...' 全 ASCII 字母数字，以 0x27(右引号) 或 0x00 结束；
+//   汉字文本（UTF-16）字节序列含 >0x80 的高字节（"大恶魔"的魔 0x9B / "大多数人"的人 0xBA）→ 非键名。
+static int __declspec(noinline) cjk_is_keyname(const char* s)
+{
+    int i;
+    if (!s || s[0] != 0x27) return 0;
+    for (i = 1; i < 64; i++)
+    {
+        unsigned char c = (unsigned char)s[i];
+        if (c == 0x27) return 1;                 // 右引号 → 键名
+        if (c == 0) return 1;                     // 无右引号（0 结束）→ 键名
+        if (c >= 0x80) return 0;                  // >0x80 = 汉字 UTF-16 高字节 → 非键名
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '_')) return 0;   // 非字母数字 → 非键名
+    }
+    return 0;
+}
+
 static void __declspec(naked) cjk_subst_key_impl(void)
 {
     __asm
@@ -3052,20 +3084,21 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         ; 进入：esp→src, esp+4→0x01(源宽标志), esp+8→len(v14); ecx=目标, edx=1
         ; 键名判别：解引用源指针读首字节 0x27（' 窄键名）或首 word 0x0027（宽键名）
         ; ★v18f：v18e 误写 byte ptr [esp]（读栈上源指针低字节，键名检测完全失效 + 随机误判）
-        ; ★v23q5：首字节 0x27 不能直接判键名——汉字"大"(U+5927, LE 27 59)低字节恰为 0x27，
-        ;   过场对白"大恶魔瓦塔尔正是这觊觎者之一，"以"大"开头 → 误判键名 → 逐字节全角化 → 整句乱码！
-        ;   窄键名特征：'X'（27 字母 27）或 'XXX'（27 字母..27）或 'X 无右引号（27 字母 0）
-        ;   ⇒ 第 3 字节 == 0x27 或 0x00 → 键名；否则（汉字，第 3 字节 = 下字符低字节）→ 宽文本分支
+        ; ★v23q6：cjk_is_keyname（C 函数）精确判别——'X...' 全 ASCII 以 27/0 结束 = 键名；
+        ;   汉字"大"(U+5927 LE 27 59)低字节 0x27 巧合 + "大恶魔"字节含 0x9B(>0x80) → 非键名
         mov  eax, [esp]                 ; eax = 源指针
         cmp  byte ptr [eax], 0x27
         jne  ck_wide_word
-        cmp  byte ptr [eax + 1], 0
-        je   subst_key                  ; 27 00 = 宽引号开头 → 键名（宽）
-        cmp  byte ptr [eax + 2], 0x27
-        je   subst_key                  ; 'X' → 键名
-        cmp  byte ptr [eax + 2], 0
-        je   subst_key                  ; 'X 无右引号（0 结束）→ 键名
-        jmp  not_key                    ; 汉字（如"大" 27 59 76…）→ 宽文本分支
+        push ecx                        ; ★ 保存 ecx/edx（not_key 路径 jmp 0x44EA 需要原值）
+        push edx
+        push eax
+        call cjk_is_keyname
+        add  esp, 4
+        pop  edx
+        pop  ecx
+        test eax, eax
+        jnz  subst_key
+        jmp  not_key
     ck_wide_word:
         cmp  word ptr [eax], 0x0027
         jne  not_key
