@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q3"
+#define CJK_VERSION "v23q4"
 
 #include "pch.h"
 
@@ -2943,15 +2943,17 @@ static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr)
                 (c >= 0xFF00 && c <= 0xFFEF)) hasCjk = 1;
             n++;
         }
-        // ★ v23q.3 诊断：无条件记录 SubstituteKeys 实际输入（前 50 次，含无 §L 的）
-        //   —— 确认取指针对错 + 为什么预展开不触发（CJK_subst_log.txt）
+        // ★ v23q.4 诊断（轻量化）：只记录【含 §L 的】输入（前 100 条）——
+        //   v23q3 每次调用都 IO（50 次）拖慢渲染 → 竞态加重（用户反馈 @ 加重）。
+        //   无 §L 的普通文本零 IO 快速返回。教程提示若走 SubstituteKeys 必含 §L + CJK。
+        if (hasSL)
         {
             LONG p = InterlockedIncrement(&s_probe);
-            if (p <= 50)
+            if (p <= 100)
             {
-                char sb[340]; char* q = sb;
+                char sb[380]; char* q = sb;
                 q += wsprintfA(q, "[SUBST %ld] ptr=%08X n=%d SL=%d CJK=%d | ", p, textPtr, n, hasSL, hasCjk);
-                for (i = 0; i < 14 && i < n + 1; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
+                for (i = 0; i < 16 && i < n + 1; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
                 q += wsprintfA(q, "\n");
                 HANDLE h = CreateFileA("CJK_subst_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
                                        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
