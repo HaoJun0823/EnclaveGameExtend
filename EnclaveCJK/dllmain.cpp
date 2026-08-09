@@ -3222,6 +3222,137 @@ static void tfstr_diag(DWORD retRva, const WORD* w, int n, int strong, int hit)
     diag_write(buf);
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// ★ v23m：§L 键名预展开（原子完成，消灭渲染竞态）
+//
+//   x64dbg/CE 取证定案（2026-08-09）：
+//     源头（未展开 §L、完整）→ 槽（未展开、完整）→ 展开器（§L→全角键名，
+//     逐字形写入）⟷ 渲染（并行读取）→ 竞态 → 键名随机缺字（SPA/SPAC/MOU…）
+//   ⇒ 修法：在【我们自己的写入者】tfstr_cjk_wide（hook 1，用户 CE 实证
+//     6F155A65/6F155AF2 访问教程文本）里预展开 §L 宏，渲染读到已展开文本
+//     → 无宏可展 → 竞态消失 → 键名稳定完整。
+//
+//   EXE 键名表（.data 0x48B830 → RVA 0x8B830，IDA 实证）：
+//     每条 = [0x22 '"'][显示名]["KB_逻辑键名"]["unbind \""] 连续排布
+//     例：'"C"'→"KB_CROUCH"、'"SPACE"'→"KB_JUMP"、'"F"'→"KB_DRINK_POTION"
+//   教程映射（0x48C190 → RVA 0x8C190）TUTORIAL_X ↔ KB_X 语义对应：
+//     TUTORIAL_JUMP → KB_JUMP → 显示名 "SPACE"（用户实证渲染 ＳＰＡＣＥ）
+//   展开链：§LTUTORIAL_JUMP → 剥 "TUTORIAL_" 前缀拼 "KB_JUMP"
+//          → 物理键表查逻辑键名 → 显示名 "SPACE" → ASCII+0xFEE0 全角化
+// ────────────────────────────────────────────────────────────────────────
+#define EXE_KEYTABLE_RVA 0x8B830u   // 物理键名表（IDA: 0x48B830 = 0x400000 + 0x8B830）
+
+// 逻辑/教程键名 → 物理键显示名（查 EXE 物理键名表，SEH 保护，失败返回 NULL）
+static const char* key_display_lookup(const char* key)
+{
+    char logical[80];
+    BYTE* p;
+    int   i;
+
+    if (!g_exeBase || !key || !key[0]) return NULL;
+    if (strncmp(key, "TUTORIAL_", 9) == 0)
+        wsprintfA(logical, "KB_%s", key + 9);      // TUTORIAL_JUMP → KB_JUMP
+    else if (strncmp(key, "KB_", 3) == 0)
+        lstrcpynA(logical, key, sizeof(logical));
+    else
+        return NULL;
+
+    p = (BYTE*)(g_exeBase + EXE_KEYTABLE_RVA);
+    __try
+    {
+        for (i = 0; i < 256; i++)
+        {
+            while (*(DWORD*)p == 0) p += 4;        // 跳过前导/对齐 0
+            if (*(DWORD*)p != 0x22) break;         // 非 '"' 开头 → 表尾/异常
+            p += 4;
+            {
+                char* disp  = (char*)p; p += lstrlenA(disp) + 1;
+                char* logic = (char*)p; p += lstrlenA(logic) + 1;
+                char* unbind = (char*)p; p += lstrlenA(unbind) + 1;
+                if (lstrcmpiA(logic, logical) == 0) return disp;
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+    return NULL;
+}
+
+// §L 宏展开：src（n WORD）→ dst（cap WORD），返回输出 WORD 数（不含终止符）
+//   识别 §L（A7 00 4C 00）→ 提取键名（字母数字下划线）→ 查显示名 → 全角化；
+//   查不到或失败时原样回退（不破坏原文本）。无 §L 时返回 0。
+static int tfstr_expand_keys(const WORD* src, int n, WORD* dst, int cap)
+{
+    int si = 0, di = 0, found = 0;
+    while (si < n && di < cap - 1)
+    {
+        WORD c = src[si];
+        if (c == 0x00A7 && si + 1 < n && src[si + 1] == 0x004C)      // §L
+        {
+            int  keyStart = si + 2;
+            char key[64];
+            int  ki = 0;
+            found = 1;
+            while (keyStart + ki < n && ki < 63)
+            {
+                WORD kc = src[keyStart + ki];
+                if (kc == 0 || kc == 0x20 || kc == 0x3000 || kc == 0x7C) break;
+                if ((kc >= 'A' && kc <= 'Z') || (kc >= 'a' && kc <= 'z') ||
+                    (kc >= '0' && kc <= '9') || kc == '_') key[ki] = (char)kc;
+                else break;
+                ki++;
+            }
+            key[ki] = 0;
+            si = keyStart + ki;
+            const char* disp = key_display_lookup(key);
+            if (disp)
+            {
+                for (const char* q = disp; *q && di < cap - 1; q++)
+                {
+                    BYTE b = (BYTE)*q;
+                    dst[di++] = (b >= 0x20 && b <= 0x7E) ? (WORD)b + 0xFEE0 : b;
+                }
+            }
+            else
+            {
+                dst[di++] = 0x00A7;                                   // 回退 §L
+                dst[di++] = 0x004C;
+                for (int j = 0; j < ki && di < cap - 1; j++)
+                    dst[di++] = src[keyStart + j];
+            }
+        }
+        else
+        {
+            dst[di++] = c;
+            si++;
+        }
+    }
+    dst[di] = 0;
+    return found ? di : 0;
+}
+
+// v23m 诊断：命中时记录输入形态（§L 检测 + 前 16 WORD 可读化）
+static void tfstr_sl_diag(DWORD retRva, const WORD* w, int n, int hasSL, int expanded)
+{
+    static volatile LONG s_cnt = 0;
+    char buf[320];
+    char* p = buf;
+    int   i;
+    if (InterlockedIncrement(&s_cnt) > 60) return;
+    p += wsprintfA(p, "[SL] ret=%05X n=%d §L=%d exp=%d | ", retRva, n, hasSL, expanded);
+    for (i = 0; i < n && i < 16; i++)
+    {
+        WORD c = w[i];
+        if (c == 0) { p += wsprintfA(p, "<00>"); break; }
+        if (c >= 0x20 && c <= 0x7E) p += wsprintfA(p, "%c", (char)c);
+        else if (c == 0x00A7)        p += wsprintfA(p, "§");
+        else if (c >= 0x4E00 && c <= 0x9FFF) p += wsprintfA(p, "[%04X]", c);
+        else if (c >= 0xFF00 && c <= 0xFF5E) p += wsprintfA(p, "F%02X", c & 0xFF);
+        else                         p += wsprintfA(p, "<%04X>", c);
+    }
+    p += wsprintfA(p, "\r\n");
+    diag_write(buf);
+}
+
 // 拼接收尾诊断：把最终写进目标对象的内容前若干字节原样 dump 出来
 static void concat_diag(const char* tag, int prefixLen, int nWords, int total,
                         const BYTE* prefix, const WORD* w)
@@ -3432,15 +3563,35 @@ static int __cdecl tfstr_cjk_wide(void* obj, const void* text, DWORD retRva)
 
     if (hit)
     {
+        int hasSL = 0, expanded = 0;
         __try
         {
             WORD* dst = (WORD*)((BYTE*)obj + 4);        // 数据【内联】在 +4
+            // ★ v23m：检测 §L 宏（A7 00 4C 00）→ 预展开为全角键名（原子完成）
+            for (i = 0; i < n - 1; i++)
+                if (w[i] == 0x00A7 && w[i + 1] == 0x004C) { hasSL = 1; break; }
+            if (hasSL)
+            {
+                WORD ebuf[TFSTR_MAX_WORDS];
+                int  en = tfstr_expand_keys(w, n, ebuf, TFSTR_MAX_WORDS);
+                if (en > 0 && en < TFSTR_MAX_WORDS - 1)
+                {
+                    for (i = 0; i < en; i++) dst[i] = ebuf[i];
+                    dst[en] = 0;
+                    *(DWORD*)obj = g_gwBase + TFSTR_VTABLE_RVA;
+                    len_put(obj, en * 2);               // 登记展开后字节长度
+                    expanded = 1;
+                    tfstr_sl_diag(retRva, w, n, hasSL, expanded);
+                    return 1;                           // 预展开版构造完成
+                }
+            }
             for (i = 0; i < n; i++) dst[i] = w[i];      // 按 WORD 搬，0x00 不再是边界
             dst[n] = 0;                                 // 宽终止 00 00
             *(DWORD*)obj = g_gwBase + TFSTR_VTABLE_RVA; // TFStr<252> vtable
             len_put(obj, n * 2);                        // ★ 登记真实字节长度
         }
         __except (EXCEPTION_EXECUTE_HANDLER) { hit = 0; }
+        if (!expanded) tfstr_sl_diag(retRva, w, n, hasSL, 0);   // v23m 诊断
     }
     else
     {
@@ -4192,6 +4343,86 @@ static DWORD WINAPI wait_thread(LPVOID)
     return 0;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23l：运行时截断文本补全线程（放弃 x64dbg 断点后的终极方案）
+//   证据链（x64dbg 三处内存实证）：
+//     堆源头(完整·未展开§L) → 拷贝①(strlen 截断「一」004E) → 槽(截断·未展开)
+//     → 展开②(§L→全角ＳＰＡＣＥ) → 栈渲染缓冲(截断·展开后) → 屏幕
+//   「一支火把」在拷贝①就丢了；槽预填且只读（写断点不命中）；槽地址每次运行
+//   变化（0x7BE01C→0x8BB800，堆池）。断点路线风险高（栈缓冲写断点导致游戏崩）。
+//   方案：后台线程每 3 秒扫描内存，找截断形态「测试你拾起了」+ 0000 终止，
+//   把「一支火把」(00 4E 2F 65 6B 70 8A 62 00 00) 补到「了」后。
+//   槽补全 → 渲染（从槽拷贝+展开）→ 显示完整。
+// ═══════════════════════════════════════════════════════════════════════
+static DWORD WINAPI text_fix_thread(LPVOID)
+{
+    // 截断形态：「测 试 你 拾 起 了」+ 00 00（UTF-16LE 终止）
+    static const BYTE patTrunc[] = {0x4B,0x6D,0xD5,0x8B,0x60,0x4F,0xFE,0x62,
+                                    0x77,0x8D,0x86,0x4E,0x00,0x00};
+    // 补丁：「一 支 火 把」+ 00 00
+    static const BYTE patchTail[] = {0x00,0x4E,0x2F,0x65,0x6B,0x70,0x8A,0x62,0x00,0x00};
+    static DWORD s_patched[256];          // 已补地址（去重）
+    static int   s_patchCnt = 0;
+    SYSTEM_INFO si;
+    BYTE* curAddr;
+    BYTE* maxAddr;
+    int   totalPatched = 0;
+
+    GetSystemInfo(&si);
+    maxAddr = (BYTE*)si.lpMaximumApplicationAddress;
+
+    for (;;)
+    {
+        Sleep(3000);
+        curAddr = (BYTE*)0x00010000;
+        __try
+        {
+            while (curAddr < maxAddr)
+            {
+                MEMORY_BASIC_INFORMATION mbi;
+                if (VirtualQuery(curAddr, &mbi, sizeof(mbi)) == 0) break;
+                if (mbi.State == MEM_COMMIT &&
+                    (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ |
+                                    PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY)) &&
+                    mbi.RegionSize >= sizeof(patTrunc))
+                {
+                    BYTE*  base = (BYTE*)mbi.BaseAddress;
+                    SIZE_T size = mbi.RegionSize;
+                    for (SIZE_T i = 0; i + sizeof(patTrunc) <= size; i++)
+                    {
+                        if (base[i] != 0x4B) continue;   // 快速首字节过滤
+                        if (memcmp(base + i, patTrunc, sizeof(patTrunc)) == 0)
+                        {
+                            DWORD hitAddr = (DWORD)(base + i);
+                            int j, dup = 0;
+                            for (j = 0; j < s_patchCnt; j++)
+                                if (s_patched[j] == hitAddr) { dup = 1; break; }
+                            if (dup) { i += sizeof(patTrunc) - 1; continue; }
+                            // 补丁：在「了」(864E) 后的 0000 处写入「一支火把」
+                            DWORD old;
+                            if (VirtualProtect(base + i + 12, sizeof(patchTail),
+                                               PAGE_READWRITE, &old))
+                            {
+                                memcpy(base + i + 12, patchTail, sizeof(patchTail));
+                                VirtualProtect(base + i + 12, sizeof(patchTail), old, &old);
+                                if (s_patchCnt < 256) s_patched[s_patchCnt++] = hitAddr;
+                                totalPatched++;
+                                log_msg("[CJK] v23l 补全截断文本 @ %08X（累计 %d 处）\n",
+                                        hitAddr, totalPatched);
+                            }
+                            i += sizeof(patTrunc) - 1;
+                        }
+                    }
+                }
+                curAddr = (BYTE*)mbi.BaseAddress + mbi.RegionSize;
+                if (curAddr <= mbi.BaseAddress) break;   // 防死循环
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { }
+    }
+    return 0;
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH)
@@ -4204,6 +4435,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         // ★ v23j：MCCDyn.CCFile::Open 函数本体 hook（EXE/GW/MS 所有模块调用一网打尽）
         //   MCCDyn 被 EXE 静态导入，进程启动即加载；教程 .xrg 读取走 CCFile 必然命中。
         install_ccfile_open_hook();
+        // ★ v23l：运行时截断文本补全线程（扫描+补「一支火把」，无需断点/拷贝函数定位）
+        {
+            HANDLE h2 = CreateThread(NULL, 0, text_fix_thread, NULL, 0, NULL);
+            if (h2) CloseHandle(h2);
+        }
         HANDLE h = CreateThread(NULL, 0, wait_thread, NULL, 0, NULL);
         if (h) CloseHandle(h);
     }
