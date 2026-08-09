@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q9.2"
+#define CJK_VERSION "v23q10"
 
 #include "pch.h"
 
@@ -4291,7 +4291,7 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
 {
     void* obj;
     int len = 0, slen = 0, i;
-    int wcnt = 0, slen_wide = 0;
+    int wcnt = 0, slen_wide = 0, scan_ok = 1;
     BYTE head[10];
 
     if (!data) return 0;
@@ -4303,12 +4303,13 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
         len = len_find(obj);
         while (slen < 252 && ((const BYTE*)data)[slen]) slen++;
         for (i = 0; i < 10; i++) head[i] = ((const BYTE*)data)[i];
+        // 宽扫描：WORD 到 0x0000 —— 实时读缓冲（无 g_len 表竞态）；低字节 0x00 汉字不腰斩
+        // ★ v23q10：宽扫描纳入 SEH 保护——缓冲无 0x0000 终止时可能越界读，AV 会被
+        //   引擎裸 strlen 同样触发（dump 56100 实证），这里先捕获防崩
+        while (wcnt < 252 && ((const WORD*)data)[wcnt]) wcnt++;
+        slen_wide = wcnt * 2;
     }
-    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
-
-    // 宽扫描：WORD 到 0x0000 —— 实时读缓冲（无 g_len 表竞态）；低字节 0x00 汉字不腰斩
-    while (wcnt < 252 && ((const WORD*)data)[wcnt]) wcnt++;
-    slen_wide = wcnt * 2;
+    __except (EXCEPTION_EXECUTE_HANDLER) { scan_ok = 0; }
 
     h5_diag(retRva, len, slen, (const BYTE*)data);
 
@@ -4321,13 +4322,14 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
     //   时接管，纯高字节汉字文本仍走 g_len 竞态分支——本次改为区间内一律宽扫描优先）。
     if (retRva >= SUB_LO && retRva <= SUB_HI)
     {
-        if (slen_wide > 0 && slen_wide <= LEN_MAXB && slen_wide >= slen)
+        if (scan_ok && slen_wide > 0 && slen_wide <= LEN_MAXB && slen_wide >= slen)
             return slen_wide;
-        // ★ v23q9.2：不再 fallback g_len（len>slen 分支）——宽扫描已覆盖区间内全部正常情况
-        //   （低字节 0x00 汉字 slen_wide>slen、纯高字节 slen_wide==slen 均接管），
-        //   g_len 在此完全多余且是竞态源（对象池复用旧长度+无锁 → 残余 @/（）越界）。
-        //   仅超长文本（>249B，罕见）落此分支 → 返回 0 用原 strlen（宁缺不越界）。
-        return 0;
+        // ★ v23q10：恢复 g_len fallback（v23q9.2 改返回 0 → 引擎原裸 strlen 无上限，
+        //   无 0 终止缓冲越界 AV → ntdll+0x92971 异常分发二次崩，dump 56100 实证：
+        //   过场台词"末尾有@@"，栈 MCCDyn→GameWorld 0xF9C92 TEXT 存储→MXR 视频）。
+        //   g_len len 有界（≤LEN_MAXB）且为构造时登记的准确长度 → 不崩；
+        //   残余 @/括号（竞态旧长度 → 越界拷贝显示残留）概率小，后续 g_len 加锁根治。
+        return (len > slen && len <= LEN_MAXB) ? len : 0;
     }
     // v16n：区间外（教程/UI 绘制）只记录不接管 —— 防止误改非字幕文本长度
     return 0;
