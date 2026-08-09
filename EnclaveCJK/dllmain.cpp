@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q20"
+#define CJK_VERSION "v23q21"
 
 #include "pch.h"
 
@@ -2062,7 +2062,8 @@ static void __declspec(noinline) cjk_f9cca_diag(DWORD a2)
                     //   ——值后若紧跟其他 TEXT 会截断，仅当 term=0 且命中才动）
                     // ★ v23q17：偏移 bug 修复——L 是【从 k 起】的匹配长度，
                     //   值末尾 = w[k + L/2]（之前写 w[L/2] → 偏移丢失 → 文本被截断）
-                    if (!hasTerm && n >= k + (int)(L / 2))
+                    // ★ v23q21：加 hasCjk 条件（确认中文文本才写终止符，防误伤窄数据缓冲）
+                    if (!hasTerm && hasCjk && n >= k + (int)(L / 2))
                     {
                         DWORD old;
                         BYTE* tail = (BYTE*)w + (k + L / 2) * 2;
@@ -5173,12 +5174,18 @@ static DWORD WINAPI wait_thread(LPVOID)
     trie_load();
     // ★ v23q20：轮询 MXR.dll（过场视频库，游戏中期加载）——hook 0xC7720 诊断
     //   过场台词路径调查（F9CCA/h5/TextOutW 均未覆盖台词，v23q12-19 实证）
+    // ★ v23q21：禁用 MXR hook（A/B 测试）——v23q20 部署后用户报 Dialogues 台词
+    //   不显示（进入游戏后），v23q20 唯一新增 = MXR hook（纯诊断，CJK_mxr_log.txt
+    //   从未生成），过场渲染函数被改入口 8B 有风险 → 先禁用确认是否元凶。
+    //   若恢复 → MXR hook 是元凶，改用更下游/只读方式调查过场台词路径。
+#if 0
     for (int mxt = 0; mxt < 3000 && !g_hookedMxr; mxt++)
     {
         int r = install_mxr_hook();
         if (r != 0) break;      // 已装成功(1) 或核验失败(-1) → 停止
         Sleep(100);
     }
+#endif
     // 阶段 1：等 GameWorld 就绪，装主 hook（含 GW 3 槽 IAT）
     while (!install_hook())
         Sleep(100);
