@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q10"
+#define CJK_VERSION "v23q11"
 
 #include "pch.h"
 
@@ -2983,9 +2983,35 @@ static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr)
                 (c >= 0xFF00 && c <= 0xFFEF)) hasCjk = 1;
             n++;
         }
-        // ★ v23q9：禁用 v23q.7 诊断（subst_log）——v23q7 实证 SubstituteKeys 入口
-        //   无含中文输入（CJK_subst_log 0 条），hasCjk 扫描本身有开销，删之
-        // if (hasCjk) { ... CJK_subst_log.txt ... }
+        // ★ v23q11 诊断：记录【含 §L + 中文】的输入（前 100 条）——确认过场台词
+        //   是否经 SubstituteKeys 0x10AA20（决定预展开改写与 @@/@蒸/SOUND 丢失的关联）
+        if (hasSL && hasCjk)
+        {
+            LONG p = InterlockedIncrement(&s_probe);
+            if (p <= 100)
+            {
+                char sb[400]; char* q = sb;
+                q += wsprintfA(q, "[SUBST %ld] ptr=%08X n=%d SL=%d CJK=%d | ", p, textPtr, n, hasSL, hasCjk);
+                for (i = 0; i < 20 && i < n + 1; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
+                q += wsprintfA(q, "\n");
+                HANDLE h = CreateFileA("CJK_subst_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                                       NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (h != INVALID_HANDLE_VALUE)
+                {
+                    SetFilePointer(h, 0, NULL, FILE_END);
+                    DWORD wn; WriteFile(h, sb, (DWORD)(q - sb), &wn, NULL);
+                    CloseHandle(h);
+                }
+            }
+        }
+        // ★ v23q11：禁用预展开改写（VirtualProtect 写回输入缓冲）——
+        //   ① 从未对教程生效（v23q7/q8 实证：教程提示不走 SubstituteKeys 0x10AA20）
+        //   ② 改写共享文本缓冲有破坏风险：v21 强制宽路径 sub_100FFD90 是【引用共享】，
+        //      过场台词若含 §L 且经 0x10AA20 → 改写源缓冲 → 所有引用者内容被改 →
+        //      SOUND 关联丢失（用户反馈"部分台词没语音"）+ 潜在 @@ 残留。
+        //   引擎自身会展开 §L；预展开既然未覆盖教程路径，改写纯属风险 → 关闭。
+        //   教程 §L 竞态另有路径（h5 retRva 反查，后续处理）。
+#if 0
         if (!hasSL || !hasCjk || n < 4) return;
         WORD ebuf[260];
         int en = tfstr_expand_keys(w, n, ebuf, 256);
@@ -3001,6 +3027,7 @@ static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr)
                 log_msg("[CJK] v23q SubstituteKeys 预展开：%d WORD -> %d WORD @ %08X\n",
                         n, en, textPtr);
         }
+#endif
     }
     __except (EXCEPTION_EXECUTE_HANDLER) { }
 }
