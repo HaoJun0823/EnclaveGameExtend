@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q13"
+#define CJK_VERSION "v23q14"
 
 #include "pch.h"
 
@@ -4396,6 +4396,8 @@ static DWORD trie_match_at(const WORD* s, int off, int maxScan)
     return best;
 }
 
+static void trie_load_xrg(void);   // v23q14 前向声明（定义在下方）
+
 static void trie_load(void)
 {
     LONG st = InterlockedCompareExchange(&g_trieState, 1, 0);
@@ -4440,8 +4442,87 @@ static void trie_load(void)
         i++;
     }
     VirtualFree(buf, 0, MEM_RELEASE);
+    trie_load_xrg();                               // ★ v23q14：加载 .xrg *TEXT 到同一 Trie
     g_trieState = 2;
-    log_msg("[CJK] v23q13 Trie 字典加载：%u 节点 / 文件 %u 字节\n", g_trieCnt, rd);
+    log_msg("[CJK] v23q13 Trie 字典加载：%u 节点（StringTable + %u 个 .xrg TEXT 文件区）\n",
+            g_trieCnt, rd);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23q14：.xrg *TEXT 提取——扫描 *TEXT "值"（UTF-16LE），含中文的值加入 Trie。
+//   只扫游戏实际加载的目录（Sbz1\Dialogues 对话/过场、Videos 过场字幕、Gui 菜单、
+//   registry 数据表等），**排除 chs_project\ 备份/工程区**（重复+乱码污染源）。
+//   已统计：46 文件 1158 条 *TEXT ≈ 9882 字符 → Trie 节点富余 9 倍。
+//   值含 §L/§p 宏原样 WORD 插入；纯 ASCII（英文）值跳过（英文窄路径有终止符无 @ 问题）。
+// ═══════════════════════════════════════════════════════════════════════
+static void trie_load_xrg_file(const char* path)
+{
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD sz = GetFileSize(h, NULL);
+    if (sz == INVALID_FILE_SIZE || sz == 0 || sz > 16 * 1024 * 1024) { CloseHandle(h); return; }
+    BYTE* buf = (BYTE*)VirtualAlloc(NULL, sz + 2, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!buf) { CloseHandle(h); return; }
+    DWORD rd = 0;
+    if (!ReadFile(h, buf, sz, &rd, NULL)) { VirtualFree(buf, 0, MEM_RELEASE); CloseHandle(h); return; }
+    CloseHandle(h);
+    int nw = (int)(rd / 2);
+    const WORD* w = (const WORD*)buf;
+    int i = 0;
+    while (i < nw - 7)
+    {
+        if (w[i] == 0x2A && w[i+1] == 0x54 && w[i+2] == 0x45 && w[i+3] == 0x58 && w[i+4] == 0x54)  // *TEXT
+        {
+            int j = i + 5;
+            while (j < nw && (w[j] == 0x20 || w[j] == 0x09)) j++;       // 跳空白到 '"'
+            if (j < nw && w[j] == 0x22)                                 // '"'
+            {
+                j++;
+                WORD val[512]; int vi = 0, hasHi = 0;
+                while (j < nw && vi < 511 && w[j] != 0x22)
+                {
+                    if (w[j] == 0x000D || w[j] == 0x000A) break;
+                    if (w[j] > 0x7F) hasHi = 1;
+                    val[vi++] = w[j++];
+                }
+                if (vi > 0 && hasHi) trie_insert(val, vi);              // 只插含中文的
+                i = j + 1;
+                continue;
+            }
+        }
+        i++;
+    }
+    VirtualFree(buf, 0, MEM_RELEASE);
+}
+
+static void trie_load_xrg_dir(const char* dir)
+{
+    char pat[300];
+    wsprintfA(pat, "%s\\*.xrg", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hf = FindFirstFileA(pat, &fd);
+    if (hf == INVALID_HANDLE_VALUE) return;
+    do
+    {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        char path[340];
+        wsprintfA(path, "%s\\%s", dir, fd.cFileName);
+        trie_load_xrg_file(path);
+    } while (FindNextFileA(hf, &fd));
+    FindClose(hf);
+}
+
+static void trie_load_xrg(void)
+{
+    trie_load_xrg_dir("Sbz1");
+    trie_load_xrg_dir("Sbz1\\Dialogues");
+    trie_load_xrg_dir("Sbz1\\Videos");
+    trie_load_xrg_dir("Sbz1\\Gui");
+    trie_load_xrg_dir("Sbz1\\registry");
+    trie_load_xrg_dir("Sbz1\\Anim");
+    trie_load_xrg_dir("Sbz1\\skies");
+    trie_load_xrg_dir("Sbz1\\Feedback");
 }
 
 // ★ hook 5：0x100F9B59（绘制前拷贝 0x100F9AFA 内的 strlen）—— 最后一道关卡
