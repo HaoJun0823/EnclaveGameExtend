@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q21"
+#define CJK_VERSION "v23q22"
 
 #include "pch.h"
 
@@ -4556,6 +4556,114 @@ static void trie_insert(const WORD* s, int nw)
     if (g_trie[node].len == 0) g_trie[node].len = (DWORD)nw * 2;   // 叶子记字节长度
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23q22：StringTable key→value 映射表 + H5 宏展开
+//   【问题】游戏内文本（STORY_L_M1 / CHECKPOINT_MSG / TUTORIAL_* 等）在 .xrg 里是
+//   §L 宏（§Z18§LSTORY_L_M1），引擎应在渲染前查 StringTable 展开成中文。但 UTF-16LE
+//   BOM 的 .xrg 文本引擎原版【不展开】→ 渲染器拿到宏（无字形）→ 游戏内文本空白
+//   （H5 日志实证：ret=EB7CF 收到 "§Z18§LSTORY_L_M1" 16B 宏文本；主菜单走 FindKeyValue
+//   查表正常所以显示）。
+//   【修法】trie_load 解析 StringTable 时额外存 key→value；H5（cjk_draw_len）检测 §L
+//   宏 → 查 KV 表 → 重建缓冲为中文（前缀+值+后缀，限长 ≤ 252B）→ 返回新字节长度 →
+//   渲染器拷贝中文 → 游戏内文本恢复显示。宏查不到（如 TUTORIAL_*/KB_*）回退现状。
+// ═══════════════════════════════════════════════════════════════════════
+#define KV_MAX 2048
+typedef struct {
+    char key[64];          // key 名（ASCII，如 "STORY_L_M1"）
+    WORD val[250];         // 值（UTF-16LE）
+    int  vlen;             // 值长度（WORD 数，0 = 空槽）
+} KVEntry;
+static KVEntry g_kv[KV_MAX];
+static int     g_kvCnt = 0;
+
+// 存 key→value（幂等：同 key 覆盖）
+static void kv_store(const WORD* key, int ki, const WORD* val, int vi)
+{
+    if (ki <= 0 || ki >= 64 || vi <= 0 || vi >= 250 || g_kvCnt >= KV_MAX) return;
+    KVEntry* e = NULL;
+    for (int i = 0; i < g_kvCnt; i++)
+        if (lstrcmpiA(g_kv[i].key, (LPCSTR)key) == 0 && g_kv[i].key[0]) { e = &g_kv[i]; break; }
+    if (!e) { e = &g_kv[g_kvCnt++]; e->key[0] = 0; }
+    for (int i = 0; i < ki; i++) e->key[i] = (char)key[i];
+    e->key[ki] = 0;
+    for (int i = 0; i < vi; i++) e->val[i] = val[i];
+    e->vlen = vi;
+}
+
+// 查 key→value，返回 KVEntry*（key 全等 ASCII 匹配）；未命中 NULL
+static KVEntry* kv_find(const char* key)
+{
+    if (!key || !key[0]) return NULL;
+    for (int i = 0; i < g_kvCnt; i++)
+        if (g_kv[i].key[0] && lstrcmpA(g_kv[i].key, key) == 0) return &g_kv[i];
+    return NULL;
+}
+
+// H5 宏展开：检测 §L（A7 00 4C 00）→ 查 KV 表 → 重建缓冲为中文。
+//   返回新字节长度（>0 = 已改写，调用方直接用）；0 = 无宏/查不到/容量不足（不接管）。
+//   w = 绘制文本缓冲（WORD*），maxw = WORD 上限（252 安全界）。
+static int cjk_macro_expand(WORD* w, int maxw)
+{
+    int n = 0;
+    __try
+    {
+        while (n < maxw && w[n]) n++;
+        int k = 0;
+        while (k < n - 1 && !(w[k] == 0x00A7 && w[k + 1] == 0x004C)) k++;
+        if (k >= n - 1) return 0;                       // 无 §L 宏
+
+        WORD ebuf[252];
+        int di = 0, pos = k, changed = 0;
+        // 前缀 [0,k) 原样复制
+        for (int i = 0; i < k && di < 250; i++) ebuf[di++] = w[i];
+        while (pos < n && di < 250)
+        {
+            if (w[pos] == 0x00A7 && pos + 1 < n && w[pos + 1] == 0x004C)
+            {
+                char key[64]; int ki = 0; int j = pos + 2;
+                while (j < n && ki < 63 &&
+                       ((w[j] >= 'A' && w[j] <= 'Z') || (w[j] >= 'a' && w[j] <= 'z') ||
+                        (w[j] >= '0' && w[j] <= '9') || w[j] == '_')) { key[ki++] = (char)w[j]; j++; }
+                key[ki] = 0;
+                KVEntry* e = ki > 0 ? kv_find(key) : NULL;
+                if (e)
+                {
+                    for (int v = 0; v < e->vlen && di < 250; v++) ebuf[di++] = e->val[v];
+                    changed = 1;
+                }
+                else
+                {
+                    // 查不到 → 原样保留 §L 宏（回退，最坏 = 现状空白）
+                    ebuf[di++] = w[pos++];
+                    if (pos < n && di < 250) ebuf[di++] = w[pos++];
+                    while (ki-- > 0 && pos < n && di < 250) ebuf[di++] = w[pos++];
+                    continue;
+                }
+                pos = j;
+            }
+            else
+            {
+                ebuf[di++] = w[pos++];
+            }
+        }
+        if (!changed || di > 250) return 0;             // 未展开或超容量
+        ebuf[di] = 0;
+        DWORD old;
+        if (!VirtualProtect(w, (n + 1) * 2, PAGE_READWRITE, &old)) return 0;
+        int ok = 0;
+        __try
+        {
+            for (int i = 0; i <= di; i++) w[i] = ebuf[i];   // 含终止符
+            ok = 1;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { }
+        VirtualProtect(w, (n + 1) * 2, old, &old);
+        if (!ok) return 0;
+        return di * 2;                                   // 新字节长度
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+}
+
 // 从偏移 off 起逐 WORD 走 Trie，返回最长命中字节长度（0=未命中）
 static DWORD trie_match_at(const WORD* s, int off, int maxScan)
 {
@@ -4617,6 +4725,7 @@ static void trie_load(void)
                 {
                     trie_insert(val, vi);
                     trie_log_entry("StringTable_Eng.txt", val, vi, 1, key, ki);   // v23q15 审查日志
+                    kv_store(key, ki, val, vi);        // ★ v23q22：key→value 映射（H5 宏展开用）
                 }
             }
         }
@@ -4826,6 +4935,27 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
     __except (EXCEPTION_EXECUTE_HANDLER) { scan_ok = 0; }
 
     h5_diag(retRva, len, slen, (const BYTE*)data);
+
+    // ★ v23q22：H5 宏展开（所有 caller，不限字幕区间）——
+    //   游戏内文本（STORY_L_M1/CHECKPOINT_MSG/BRIEFING_* 等）在 .xrg 里是 §L 宏
+    //   （H5 日志实证 ret=EB7CF 收到 "§Z18§LSTORY_L_M1" 16B 宏文本，caller 0xEBxxx
+    //   远在字幕区间 0x8D000-0x8F000 之外），引擎对 UTF-16LE BOM 的宏不展开 →
+    //   渲染器拿宏（无字形）→ 游戏内文本空白。这里查 KV 表（trie_load 已存
+    //   StringTable 全部 key→value）→ 重建缓冲为中文 → 返回新长度。
+    //   无 §L 宏 → 返回 0 → 零开销走原逻辑；查不到宏 → 回退现状（最坏 = 原空白）。
+    //   KV 表由 wait_thread 的 trie_load() 主动填充（g_kvCnt>0 才启用）。
+    if (g_kvCnt > 0)
+    {
+        int ml = cjk_macro_expand((WORD*)data, 250);
+        if (ml > 0)
+        {
+            static volatile LONG s_macro = 0;
+            LONG mc = InterlockedIncrement(&s_macro);
+            if (mc <= 60)
+                log_msg("[CJK] v23q22 H5 宏展开 %dB ret=%05X\n", ml, retRva);
+            return ml;
+        }
+    }
 
     // ★ v23q9：字幕区间内【优先宽扫描长度】——根治句尾 @/@攀/@攀 闪烁
     //   根因：g_len 登记表 key=TFStr 对象指针，对象池复用 → 旧文本长度残留；
