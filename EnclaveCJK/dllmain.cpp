@@ -2066,7 +2066,10 @@ static int install_probe_hook(void)
     BYTE* e2;
     DWORD oldProt;
     static const BYTE expect1[5] = {0x8B, 0x54, 0x24, 0x04, 0x56}; // mov edx,[esp+4]; push esi
-    static const BYTE expect2[7] = {0x53, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x0C}; // push ebx;esi;edi; mov edi,[esp+0Ch]
+    // ★ v23b 修复：sub_100EFCBA 头 = push ebx(53) push esi(56) push edi(57) mov edi,[esp+0x10](8B 7C 24 10)
+    //   3 个 push 后 esp 已 -12，所以 mov edi 的 [esp+0Ch+arg_0] 编码为 8B 7C 24 10（esp+0x10）！
+    //   （原写 0x0C 错误 → 核验失败探针没装上，日志证实：53 56 57 8B 7C 24 10）
+    static const BYTE expect2[7] = {0x53, 0x56, 0x57, 0x8B, 0x7C, 0x24, 0x10};
     if (g_f9ccaTramp && g_efcbaTramp) return 1;
     if (!g_gwBase) return 0;
 
@@ -2083,7 +2086,9 @@ static int install_probe_hook(void)
     memcpy(g_origF9CCA, e1, 5);
     memcpy(g_f9ccaTramp, e1, 5);
     g_f9ccaTramp[5] = 0xE9;
-    *(DWORD*)(g_f9ccaTramp + 6) = ((DWORD)e1 + 5) - ((DWORD)g_f9ccaTramp + 11);
+    // ★ v23b 修复：E9 在 tramp[5]，下一条指令 = tramp+10，rel 必须相对 tramp+10！
+    //   （原写 -11 多减 1 → 跳回 e1+4 重复执行 push esi → 栈破坏 → Eip 跳栈崩溃 C0000005）
+    *(DWORD*)(g_f9ccaTramp + 6) = ((DWORD)e1 + 5) - ((DWORD)g_f9ccaTramp + 10);
     VirtualProtect(e1, 5, PAGE_EXECUTE_READWRITE, &oldProt);
     e1[0] = 0xE9;
     *(DWORD*)(e1 + 1) = (DWORD)cjk_f9cca_probe - ((DWORD)e1 + 5);
@@ -2103,7 +2108,9 @@ static int install_probe_hook(void)
     memcpy(g_origEFCBA, e2, 7);
     memcpy(g_efcbaTramp, e2, 7);
     g_efcbaTramp[7] = 0xE9;
-    *(DWORD*)(g_efcbaTramp + 8) = ((DWORD)e2 + 7) - ((DWORD)g_efcbaTramp + 13);
+    // ★ v23b 修复：E9 在 tramp[7]，下一条指令 = tramp+12，rel 必须相对 tramp+12！
+    //   （原写 -13 多减 1 → 同样栈破坏崩溃）
+    *(DWORD*)(g_efcbaTramp + 8) = ((DWORD)e2 + 7) - ((DWORD)g_efcbaTramp + 12);
     VirtualProtect(e2, 7, PAGE_EXECUTE_READWRITE, &oldProt);
     e2[0] = 0xE9;
     *(DWORD*)(e2 + 1) = (DWORD)cjk_efcba_probe - ((DWORD)e2 + 5);
