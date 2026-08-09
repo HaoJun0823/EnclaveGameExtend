@@ -2141,6 +2141,129 @@ static int install_probe_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ★ v23d：EXE 文件 API IAT 探针——记录所有 .xrg 文件打开 + caller
+//
+//   ◆ 为什么需要：探针日志证明教程 TEXT（LM01.xrg「你拾起了一支火把」）
+//     完全不经 GameWorld 的 sub_100F9CCA（F9CCA 只看到 NPC 对话，全部完整）。
+//     教程 LM01.xrg 是 *dialogue 格式，但由 Enclave.exe 主程序直接解析渲染
+//     （v16l 结论：教程直接渲染路径）→ 截断发生在 EXE 自己的文本存储/拷贝链。
+//   ◆ 方案：hook Enclave.exe 的 KERNEL32.CreateFileA / ReadFile IAT 槽
+//     （RVA 0x770DC / 0x770B4，解析导入表实证），记录：
+//       - lpFileName（CreateFileA 参数1）
+//       - caller（返回地址 = [esp] 保存）
+//     只记录文件名含 ".xrg"/".XRG" 或 "LM0"/"DM" 的 → CJK_file_log.txt
+//   ◆ 目的：定位 LM01.xrg 被哪个函数打开 → 反查该函数就是教程解析入口。
+// ═══════════════════════════════════════════════════════════════════════
+#define IAT_EXE_CREATEFILEA_RVA 0x770DCu  // Enclave.exe KERNEL32.CreateFileA IAT 槽
+#define IAT_EXE_READFILE_RVA    0x770B4u  // Enclave.exe KERNEL32.ReadFile IAT 槽
+static BOOL   (WINAPI* g_origExeReadFile)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+static volatile LONG g_inFileProbe = 0;
+
+static void file_probe_log(const char* name, DWORD caller)
+{
+    char buf[300];
+    if (!name) return;
+    // 只记录 xrg 相关文件（教程/对话）
+    if (!(strstr(name, ".xrg") || strstr(name, ".XRG") ||
+          strstr(name, "LM0") || strstr(name, "DM0"))) return;
+    wsprintfA(buf, "[FILE] caller=%08X name=%s\n", caller, name);
+    HANDLE h = CreateFileA("CJK_file_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    SetFilePointer(h, 0, NULL, FILE_END);
+    DWORD written;
+    WriteFile(h, buf, lstrlenA(buf), &written, NULL);
+    CloseHandle(h);
+}
+
+// ★ v23d：naked 完美转发——进入时栈=[ret, lpFileName, dwDesiredAccess, ...]
+//   pushad 后 [esp+0x20]=caller(ret), [esp+0x24]=lpFileName
+//   log 完 popad → jmp 原函数（栈原样，stdcall 参数完整）→ 零开销正确返回
+static HANDLE(WINAPI* g_origExeCreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+
+static void __declspec(naked) my_ExeCreateFileA(void)
+{
+    __asm
+    {
+        pushad
+        ; pushad 布局: [0x20]=caller(ret), [0x24]=lpFileName, [0x28]=dwDesiredAccess ...
+        cmp  byte ptr [g_inFileProbe], 1
+        je   cf_skip
+        mov  byte ptr [g_inFileProbe], 1
+        mov  eax, [esp + 0x24]          ; lpFileName
+        mov  ebx, [esp + 0x20]          ; caller
+        push eax                        ; 参数2: name
+        push ebx                        ; 参数1: caller
+        call file_probe_log
+        add  esp, 8
+        mov  byte ptr [g_inFileProbe], 0
+    cf_skip:
+        popad
+        jmp  dword ptr [g_origExeCreateFileA]
+    }
+}
+
+static BOOL WINAPI my_ExeReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead,
+                                  LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped)
+{
+    return g_origExeReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
+}
+
+// 安装：校验 IAT 槽现值 = kernel32 导出地址后替换
+static int install_file_probe_hook(void)
+{
+    HMODULE hK32;
+    DWORD*  slot;
+    DWORD   oldProt;
+    DWORD   cur;
+
+    if (!g_exeBase) return 0;
+    hK32 = GetModuleHandleA("kernel32.dll");
+    if (!hK32) return 0;
+
+    // CreateFileA 槽
+    slot = (DWORD*)(g_exeBase + IAT_EXE_CREATEFILEA_RVA);
+    __try
+    {
+        cur = *slot;
+        if (cur != (DWORD)GetProcAddress(hK32, "CreateFileA"))
+        {
+            log_msg("[CJK] v23d EXE CreateFileA 槽校验失败：%08X != %08X，跳过\n",
+                    cur, (DWORD)GetProcAddress(hK32, "CreateFileA"));
+            return 0;
+        }
+        g_origExeCreateFileA = (HANDLE(WINAPI*)(LPCSTR,DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,DWORD,HANDLE))cur;
+        VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
+        *slot = (DWORD)my_ExeCreateFileA;
+        VirtualProtect(slot, 4, oldProt, &oldProt);
+        log_msg("[CJK] v23d EXE CreateFileA IAT hook：%08X -> %08X（CJK_file_log.txt）\n",
+                (DWORD)slot, (DWORD)my_ExeCreateFileA);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+    // ReadFile 槽
+    slot = (DWORD*)(g_exeBase + IAT_EXE_READFILE_RVA);
+    __try
+    {
+        cur = *slot;
+        if (cur != (DWORD)GetProcAddress(hK32, "ReadFile"))
+        {
+            log_msg("[CJK] v23d EXE ReadFile 槽校验失败：%08X != %08X，跳过\n",
+                    cur, (DWORD)GetProcAddress(hK32, "ReadFile"));
+            return 0;
+        }
+        g_origExeReadFile = (BOOL(WINAPI*)(HANDLE,LPVOID,DWORD,LPDWORD,LPOVERLAPPED))cur;
+        VirtualProtect(slot, 4, PAGE_READWRITE, &oldProt);
+        *slot = (DWORD)my_ExeReadFile;
+        VirtualProtect(slot, 4, oldProt, &oldProt);
+        log_msg("[CJK] v23d EXE ReadFile IAT hook：%08X -> %08X\n", (DWORD)slot, (DWORD)my_ExeReadFile);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ★ v18（x64dbg 动态取证定案）：hook Localize_SubstituteKeys 内 call 0x44EA 调用点
 //   （MSystem RVA 0x10ABEA）——§L 键名展开的【最终写入点】！
 //
@@ -3423,6 +3546,10 @@ static BOOL install_hook(void)
                     log_msg("[CJK] GetModuleHandle(NULL) 失败，EXE IAT 跳过\n");
                 }
             }
+
+            // ★ v23d：EXE CreateFileA/ReadFile IAT 探针（记录 .xrg 文件打开 + caller）
+            //   —— 教程 LM01.xrg 由 EXE 直接解析渲染，不走 GameWorld 的 F9CCA
+            if (g_exeBase) install_file_probe_hook();
 
             // ★ v16m：渲染最终出口 GDI TextOutW —— 教程文本的唯一观察点（直接渲染路径）
             {
