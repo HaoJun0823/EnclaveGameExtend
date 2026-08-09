@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q17"
+#define CJK_VERSION "v23q17.2"
 
 #include "pch.h"
 
@@ -4721,12 +4721,19 @@ static int __cdecl cjk_draw_len(const void* data, DWORD retRva)
                     DWORD L = trie_match_at(t, k, 200);
                     if (L > 0 && L <= LEN_MAXB)
                     {
-                        // ★ v23q17：h5 命中日志（前 60 次）——确认 h5 是否触发 + 命中情况
-                        static volatile LONG s_h5 = 0;
-                        LONG m5 = InterlockedIncrement(&s_h5);
-                        if (m5 <= 60)
-                            log_msg("[CJK] v23q17 h5 Trie命中 %uB(k=%d) ret=%05X\n", L, k, retRva);
-                        return (int)L;
+                        // ★ v23q17.2：返回【含前缀偏移】的总长度 k*2+L！
+                        //   之前只返回 L（正文长度）→ 引擎按缓冲起点拷贝 → 错位 →
+                        //   尾部缺"前缀长度"个字符（用户实证：缺 1-2 字 = 前缀 1-2 WORD）
+                        int total = k * 2 + (int)L;
+                        if (total > 0 && total <= LEN_MAXB)
+                        {
+                            static volatile LONG s_h5 = 0;
+                            LONG m5 = InterlockedIncrement(&s_h5);
+                            if (m5 <= 60)
+                                log_msg("[CJK] v23q17.2 h5 Trie命中 %uB(k=%d total=%d) ret=%05X\n",
+                                        L, k, total, retRva);
+                            return total;
+                        }
                     }
                 }
             }
