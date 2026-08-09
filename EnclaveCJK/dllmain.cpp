@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v20"
+#define CJK_VERSION "v21"
 
 #include "pch.h"
 
@@ -1800,6 +1800,120 @@ static int install_getval_call_hook(void)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// ★ v21（x64dbg 单步取证定案）：hook GameWorld sub_1008E1C0 内 TEXT 存储调用点
+//   （GameWorld RVA 0x8E20C = call sub_100F9CCA）——修复「你拾起了一支火把」截断！
+//
+//   ◆ x64dbg 单步实证（TEXT 读取点 0x8E1F7 命中 → GetValue 查表命中 → 0x100A9B00）：
+//     教程 TEXT（LM01.xrg *TEXT 值）首字符 = 全角空格 0x3000（LE 00 30）！
+//     → sub_100F9CCA 判定 [文本+1]&0x40：0x30&0x40=0 → 【判窄】→ sub_100EFCBA
+//       → vtable 深拷贝（+76 取窄 strlen 长度 → +108 拷贝）→ 「一」(U+4E00 LE 00 4E)
+//       低字节 0x00 被当结束符 → 截断「一支火把」！
+//     对白「救」=0x6551（LE 51 65）→ [1]=0x65 → 0x65&0x40=0x40 → 判宽 → 完整。
+//   ◆ v20 hook 未命中分支 0x10060615 无效：教程 TEXT 查表【命中】（eax=0x145150A0），
+//     根本不过未命中分支！截断点在【存入】环节 sub_100F9CCA 的窄路径。
+//   ◆ 修复：hook 调用点 0x8E20C（5B E8 B9 BA 06 00 = call 0xF9CCA）→ handler：
+//     检测源 CStr 文本含 UTF-16 宽特征（偶数偏移 0x00 + 下字节非 0）→ 强制走
+//     宽路径（sub_100FFD90 引用共享，不截断）；否则模拟原 call 走原逻辑。
+// ═══════════════════════════════════════════════════════════════════════
+#define GW_TEXT_STORE_CALL_RVA 0x8E20Cu   // sub_1008E1C0 内 call sub_100F9CCA 调用点
+#define GW_TEXT_STORE_RET_RVA  0x8E211u   // call 返回地址
+#define GW_TEXT_STORE_F9CCA_RVA 0xF9CCAu  // sub_100F9CCA 原函数（窄路径 fallback）
+#define GW_TEXT_STORE_FFD90_RVA 0xFFD90u  // sub_100FFD90 宽路径（引用共享）
+static BYTE  g_origTextStore[5];
+static DWORD g_textStoreRetVA = 0;        // 运行时返回地址（base+0x8E211）
+static DWORD g_textStoreF9CCA = 0;        // 运行时原函数（base+0xF9CCA）
+static DWORD g_textStoreFFD90 = 0;        // 运行时宽路径（base+0xFFD90）
+static BOOL  g_hookedTextStore = FALSE;
+
+// v21 handler：hook 调用点（jmp 替换 call，无返回地址）
+// 进入：ecx=this（教程对象+8）, [esp]=a2（TEXT CStr*）——call 前 push 的源参数
+// 注意：调用点 0x0D66E1FE 处 lea ecx,[ebx+8] 已设 ecx；0x0D66E1FD push eax 压了 a2。
+// handler 用 pushad 保存后 [esp+0x20]=a2, [esp+0x18]=原ecx。
+// 宽路径模拟（sub_100FFD90(this+4, a2+4)，引用共享不截断）：
+//   进入时 [esp]=a2 → push ret 后 [esp]=ret,[esp+4]=a2 → mov [esp+4],a2+4
+//   → lea ecx,[this+4] → jmp sub_100FFD90（ret 0x04 弹 a2+4 → 返回 ret）→ 栈平衡
+static void __declspec(naked) cjk_text_store_impl(void)
+{
+    __asm
+    {
+        ; 进入：[esp]=a2(TEXT CStr*), ecx=this —— 无返回地址（jmp 替换 call）
+        pushad
+        ; pushad 布局: [0x00]EDI [0x04]ESI [0x08]EBP [0x0C]ESP [0x10]EBX [0x14]EDX [0x18]ECX [0x1C]EAX
+        ; 调用点 push 的 a2 在 [esp+0x20]
+        mov  esi, [esp + 0x20]          ; esi = a2（TEXT CStr*）
+        test esi, esi
+        jz   ts_orig                    ; 空源 → 原逻辑
+        mov  edi, [esi + 4]             ; edi = a2->文本指针
+        test edi, edi
+        jz   ts_orig                    ; 空文本 → 原逻辑
+        ; 扫描前 16 WORD：偶数偏移字节==0 且下字节非 0 → UTF-16 宽文本特征
+        xor  ebx, ebx
+    ts_scan:
+        cmp  ebx, 16
+        jae  ts_orig                    ; 无宽特征 → 原逻辑（窄路径）
+        movzx eax, byte ptr [edi + ebx*2]
+        test eax, eax
+        jnz  ts_next
+        movzx eax, byte ptr [edi + ebx*2 + 1]
+        test eax, eax
+        jnz  ts_wide                    ; ★ 偶数0+后非0 → UTF-16 宽文本（如「一」00 4E）
+    ts_next:
+        inc  ebx
+        jmp  ts_scan
+    ts_wide:
+        ; ★ 强制宽路径：sub_100FFD90(this+4, a2+4)（引用共享，不截断）
+        popad
+        ; 恢复后 [esp]=a2（原调用点压的）, ecx=this
+        mov  eax, [esp]                 ; eax = a2
+        add  eax, 4                     ; eax = a2+4
+        push dword ptr [g_textStoreRetVA]   ; [esp]=ret, [esp+4]=a2
+        mov  [esp + 4], eax             ; [esp+4]=a2+4（覆盖原 a2）
+        lea  ecx, [ecx + 4]             ; ecx = this+4
+        jmp  dword ptr [g_textStoreFFD90]
+        ; sub_100FFD90 ret 0x04 弹 a2+4 → 返回 0x0D66E211 → 栈平衡 ✓
+    ts_orig:
+        popad
+        ; 恢复后 [esp]=a2, ecx=this
+        push dword ptr [g_textStoreRetVA]   ; [esp]=ret, [esp+4]=a2
+        jmp  dword ptr [g_textStoreF9CCA]
+        ; sub_100F9CCA ret 0x04 弹 a2 → 返回 0x0D66E211 → 原逻辑 ✓
+    }
+}
+
+static int install_text_store_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hGw;
+    static const BYTE expect[5] = {0xE8, 0xB9, 0xBA, 0x06, 0x00};
+    if (g_hookedTextStore) return 1;
+    hGw = GetModuleHandleA("GameWorld.dll");
+    if (!hGw) return 0;
+    g_gwBase = (DWORD)hGw;
+    entry = (BYTE*)hGw + GW_TEXT_STORE_CALL_RVA;
+    memcpy(g_origTextStore, entry, 5);
+    if (memcmp(g_origTextStore, expect, 5) != 0)
+    {
+        log_msg("[CJK] v21 TEXT 存储调用点核验失败：%02X %02X %02X %02X %02X，跳过\n",
+                g_origTextStore[0], g_origTextStore[1], g_origTextStore[2],
+                g_origTextStore[3], g_origTextStore[4]);
+        return 0;
+    }
+    g_textStoreRetVA  = g_gwBase + GW_TEXT_STORE_RET_RVA;
+    g_textStoreF9CCA  = g_gwBase + GW_TEXT_STORE_F9CCA_RVA;
+    g_textStoreFFD90  = g_gwBase + GW_TEXT_STORE_FFD90_RVA;
+    if (!VirtualProtect(entry, 5, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_text_store_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, 5, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, 5);
+    g_hookedTextStore = TRUE;
+    log_msg("[CJK] v21 TEXT 存储调用点 hook：%08X -> %08X（宽->%08X 原->%08X ret=%08X）\n",
+            (DWORD)entry, (DWORD)cjk_text_store_impl, g_textStoreFFD90, g_textStoreF9CCA, g_textStoreRetVA);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // ★ v18（x64dbg 动态取证定案）：hook Localize_SubstituteKeys 内 call 0x44EA 调用点
 //   （MSystem RVA 0x10ABEA）——§L 键名展开的【最终写入点】！
 //
@@ -3032,6 +3146,14 @@ static BOOL install_hook(void)
             //   → 死循环；v20 只 hook GetValue 未命中这一处调用点（影响面最小），
             //   检测源是 UTF-16 宽文本 → 模拟 call 跳宽版 0x100096BA（WORD 扫不截断）。
             install_getval_call_hook();
+            // ★ v21：hook GameWorld sub_1008E1C0 内 TEXT 存储调用点 0x8E20C
+            //   （call sub_100F9CCA）——修复「你拾起了一支火把」→「你拾起了」！
+            //   x64dbg 单步实证：教程 TEXT 首字符全角空格 0x3000（LE 00 30）→
+            //   sub_100F9CCA 判定 [文本+1]&0x40 = 0 → 判窄 → 深拷贝窄 strlen 截断
+            //   「一」(00 4E)；对白「救」0x6551 判宽完整。v20 未命中分支 hook 无效
+            //   （教程查表命中）。v21 handler 检测 UTF-16 宽文本 → 强制走宽路径
+            //   （sub_100FFD90 引用共享，不截断）。
+            install_text_store_hook();
             // ★ v18f：hook 0x10ABEA 调用点（键名'XXX'首字符判别——键名全角化，
             //   宽文本值模拟原 call 0x44EA 原样处理）。
             //   【v18f 禁用 0x44EA 本体 hook】：v18e 实测崩溃（0xC0000096 空跳转）——
