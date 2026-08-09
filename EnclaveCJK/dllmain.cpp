@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q19"
+#define CJK_VERSION "v23q20"
 
 #include "pch.h"
 
@@ -2174,6 +2174,102 @@ static int install_f9cca_hook(void)
     g_hookedF9cca = TRUE;
     log_msg("[CJK] v23q12 F9CCA 本体 hook：%08X -> %08X（tramp=%08X）\n",
             (DWORD)entry, (DWORD)cjk_f9cca_impl, (DWORD)g_f9ccaDiagTramp);
+    return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23q20 诊断：hook MXR.dll 0xC7720（过场渲染大函数，栈 0x440）入口——
+//   过场台词（"看来…"/"用我的——"）不经过 F9CCA/h5/TextOutW（v23q12-19 实证），
+//   56100 崩溃栈显示 MXR 参与过场 → 试探 MXR 是否处理台词文本。
+//   只诊断：记录参数1（原 esp+4）指向内容，含中文才记录（前 60 次）→ CJK_mxr_log.txt
+// ═══════════════════════════════════════════════════════════════════════
+#define MXR_C7720_RVA 0xC7720u
+static BYTE* g_mxrTramp = NULL;
+static BOOL  g_hookedMxr = FALSE;
+
+static void __declspec(noinline) cjk_mxr_diag(DWORD a1)
+{
+    static volatile LONG s_cnt = 0;
+    __try
+    {
+        if (!a1 || a1 < 0x10000) return;
+        WORD* w = (WORD*)a1;
+        int n = 0, hasCjk = 0;
+        while (n < 16 && w[n])
+        {
+            WORD c = w[n];
+            BYTE lo = (BYTE)c;
+            if (((lo < 0x20 || lo > 0x7E) && c >= 0x4E00 && c <= 0x9FFF) ||
+                (c >= 0xFF00 && c <= 0xFFEF) || (c >= 0x3000 && c <= 0x303F)) hasCjk = 1;
+            n++;
+        }
+        if (!hasCjk) return;
+        LONG c2 = InterlockedIncrement(&s_cnt);
+        if (c2 > 60) return;
+        char sb[420]; char* q = sb;
+        q += wsprintfA(q, "[MXR %ld] a1=%08X n=%d | ", c2, a1, n);
+        for (int i = 0; i < 16; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
+        q += wsprintfA(q, "\n");
+        HANDLE h = CreateFileA("CJK_mxr_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                               NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE)
+        {
+            SetFilePointer(h, 0, NULL, FILE_END);
+            DWORD wn; WriteFile(h, sb, (DWORD)(q - sb), &wn, NULL);
+            CloseHandle(h);
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+static void __declspec(naked) cjk_mxr_impl(void)
+{
+    __asm
+    {
+        ; 进入：0xC7720 头 8B（push -1; mov eax,fs:[0]）被替换
+        ; [esp]=ret, [esp+4]=参数1
+        pushad
+        mov  eax, [esp + 0x24]           ; 参数1（pushad 后 = 原 esp+4）
+        test eax, eax
+        jz   mx_skip
+        push eax
+        call cjk_mxr_diag
+        add  esp, 4
+    mx_skip:
+        popad
+        jmp  dword ptr [g_mxrTramp]      ; trampoline：原 8B + jmp 原函数+8
+    }
+}
+
+static int install_mxr_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMx;
+    static const BYTE expect[8] = {0x6A, 0xFF, 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00};  // push -1; mov eax,fs:[0]
+    if (g_hookedMxr) return 1;
+    hMx = GetModuleHandleA("MXR.dll");
+    if (!hMx) return 0;
+    entry = (BYTE*)hMx + MXR_C7720_RVA;
+    if (memcmp(entry, expect, 8) != 0)
+    {
+        log_msg("[CJK] v23q20 MXR C7720 核验失败：%02X %02X %02X %02X %02X %02X %02X %02X，跳过\n",
+                entry[0], entry[1], entry[2], entry[3], entry[4], entry[5], entry[6], entry[7]);
+        return -1;
+    }
+    g_mxrTramp = (BYTE*)VirtualAlloc(NULL, 48, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_mxrTramp) return 0;
+    memcpy(g_mxrTramp, entry, 8);                      // 原 8B
+    g_mxrTramp[8] = 0xE9;                              // jmp 原函数+8
+    *(DWORD*)(g_mxrTramp + 9) = (DWORD)(entry + 8) - (DWORD)(g_mxrTramp + 13);
+    if (!VirtualProtect(entry, 8, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_mxr_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, 8, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, 8);
+    g_hookedMxr = TRUE;
+    log_msg("[CJK] v23q20 MXR C7720 hook：%08X -> %08X（tramp=%08X）\n",
+            (DWORD)entry, (DWORD)cjk_mxr_impl, (DWORD)g_mxrTramp);
     return 1;
 }
 //   ◆ sub_100F9CCA（RVA 0xF9CCA）头部 5B = `8B 54 24 04 56`
@@ -5075,6 +5171,14 @@ static DWORD WINAPI wait_thread(LPVOID)
     // ★ v23q16：主动加载 Trie 字典（不依赖 h5 触发——过场不走 h5，v23q15 审查日志
     //   未生成实证）。wait_thread 在 DllMain 后创建，无 Loader Lock，文件 IO 安全。
     trie_load();
+    // ★ v23q20：轮询 MXR.dll（过场视频库，游戏中期加载）——hook 0xC7720 诊断
+    //   过场台词路径调查（F9CCA/h5/TextOutW 均未覆盖台词，v23q12-19 实证）
+    for (int mxt = 0; mxt < 3000 && !g_hookedMxr; mxt++)
+    {
+        int r = install_mxr_hook();
+        if (r != 0) break;      // 已装成功(1) 或核验失败(-1) → 停止
+        Sleep(100);
+    }
     // 阶段 1：等 GameWorld 就绪，装主 hook（含 GW 3 槽 IAT）
     while (!install_hook())
         Sleep(100);
