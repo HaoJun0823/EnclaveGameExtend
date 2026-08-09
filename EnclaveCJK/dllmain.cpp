@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q6"
+#define CJK_VERSION "v23q7"
 
 #include "pch.h"
 
@@ -2955,17 +2955,17 @@ static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr)
                 (c >= 0xFF00 && c <= 0xFFEF)) hasCjk = 1;
             n++;
         }
-        // ★ v23q.5 诊断（轻量化）：只记录【含 §L + CJK 的】输入（前 100 条）——
-        //   加载画面 §LSTD_LOADING（CJK=0）不记录，防刷屏占满配额；
-        //   教程提示（含 §L + 中文正文）若走 SubstituteKeys 必记录 + 预展开触发。
-        if (hasSL && hasCjk)
+        // ★ v23q.7 诊断：记录【所有含中文的】输入（前 100 条）——加载画面 §LSTD_LOADING
+        //   （纯 ASCII key 无中文）不记录防刷屏；教程提示（含中文正文）无论 SL=0/1 必记录，
+        //   直接判定：教程文本到底经不经 SubstituteKeys 0x10AA20 入口、§L 是否已在上游展开。
+        if (hasCjk)
         {
             LONG p = InterlockedIncrement(&s_probe);
             if (p <= 100)
             {
                 char sb[380]; char* q = sb;
                 q += wsprintfA(q, "[SUBST %ld] ptr=%08X n=%d SL=%d CJK=%d | ", p, textPtr, n, hasSL, hasCjk);
-                for (i = 0; i < 16 && i < n + 1; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
+                for (i = 0; i < 20 && i < n + 1; i++) q += wsprintfA(q, "%04X ", (unsigned)w[i]);
                 q += wsprintfA(q, "\n");
                 HANDLE h = CreateFileA("CJK_subst_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
                                        NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -3077,6 +3077,33 @@ static int __declspec(noinline) cjk_is_keyname(const char* s)
     return 0;
 }
 
+// ★ v23q7 诊断：v18e subst_key 分支实际处理的键名（前 200 次）——
+//   确认竞态源：逐字形全角化写入目标缓冲 ⟷ 渲染并行读（缺尾部随机）
+static void __declspec(noinline) cjk_key_diag(const char* src, int len, void* dst)
+{
+    static volatile LONG s_cnt = 0;
+    LONG c = InterlockedIncrement(&s_cnt);
+    if (c > 200) return;
+    char sb[256]; char* q = sb;
+    q += wsprintfA(q, "[KEYDIAG %ld] src=%08X dst=%08X len=%d | ", c, src, dst, len);
+    for (int i = 0; i < 14 && i < len; i++) q += wsprintfA(q, "%02X ", (unsigned char)src[i]);
+    q += wsprintfA(q, "| '");
+    for (int i = 0; i < 14 && i < len; i++)
+    {
+        unsigned char ch = (unsigned char)src[i];
+        *q++ = (ch >= 0x20 && ch < 0x7F) ? ch : '.';
+    }
+    *q++ = '\''; *q++ = '\n';
+    HANDLE h = CreateFileA("CJK_keydiag_log.txt", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h != INVALID_HANDLE_VALUE)
+    {
+        SetFilePointer(h, 0, NULL, FILE_END);
+        DWORD wn; WriteFile(h, sb, (DWORD)(q - sb), &wn, NULL);
+        CloseHandle(h);
+    }
+}
+
 static void __declspec(naked) cjk_subst_key_impl(void)
 {
     __asm
@@ -3109,6 +3136,12 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         mov  esi, [esp + 0x20]          ; 源
         mov  edi, [esp + 0x18]          ; 原 ecx = 目标（宽）
         mov  ebx, [esp + 0x28]          ; len
+        ; ★ v23q7 诊断：记录实际处理的键名（源/目标/长度/字节）
+        push edi
+        push ebx
+        push esi
+        call cjk_key_diag
+        add  esp, 12
         xor  edx, edx                   ; 源偏移
         ; 宽窄判别：byte[1]==0 → 宽键名（逐宽字符）；否则窄键名（逐字节）
         cmp  byte ptr [esi + 1], 0
