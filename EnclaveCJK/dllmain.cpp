@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23p"
+#define CJK_VERSION "v23q"
 
 #include "pch.h"
 
@@ -2897,6 +2897,121 @@ static int install_conv_hook(void)
 #define MS_SUBST_CALL_RVA 0x10ABEAu     // call 0x44EA 指令地址（SubstituteKeys 内）
 #define MS_SUBST_BACK_RVA 0x10ABF9u     // 循环退出点（test ax,ax）
 #define MS_SUBST_RET_RVA  0x10ABEFu     // 原 call 返回地址（lea eax,[edi+edi]）
+
+// ═══════════════════════════════════════════════════════════════════════
+// ★ v23q：hook SubstituteKeys 本体（0x10AA20）入口 —— §L 宏预展开（竞态根治）
+//
+//   【问题】教程文本（.xrg *TEXT "按 §LTUTORIAL_WEAPON 取出武器"）渲染时由引擎
+//   SubstituteKeys（MSystem 0x10AA20）展开 §L → 键名（半角 ASCII）逐字形写入输出
+//   缓冲 ⟷ 渲染并行读 → 键名随机缺失 1-2 字符 + 半角 ASCII 无字形 → 句尾 @。
+//   v23m 的预展开在 hook1（tfstr_cjk_wide 0x10054F00）内，但教程 TEXT 构造不走
+//   hook1（tfstr_log 实证只有资源名 "SN"）→ 预展开从未生效（key_display_lookup
+//   从未被调用）。v23l 的 text_fix_thread（全内存暴力补写）能临时掩盖但写坏内存崩。
+//
+//   【修法】在 SubstituteKeys 入口【原子预展开输入】：检测 §L → 展开为全角键名
+//   （tfstr_expand_keys：§L→KB_→EXE 物理键表→全角）→ 写回输入缓冲（只缩短）。
+//   引擎随后展开时无 §L 可展 → 无逐字形写入 → 竞态消失；键名已全角 → 无 @。
+//   覆盖【所有】§L 文本路径（教程/菜单/字幕）——不依赖具体调用点。
+//
+//   【失败安全】改写只在【缩短】时进行（en < n），绝不扩展越界；VirtualProtect+SEH
+//   保护；查不到键名时 tfstr_expand_keys 原样回退 §L（保留原文，最坏 = 现状）。
+//   key_display_lookup = v23n 纯防御版（限长 64/跳 0 限 8/条目 ≤64）安全。
+// ═══════════════════════════════════════════════════════════════════════
+static int tfstr_expand_keys(const WORD* src, int n, WORD* dst, int cap);   // 定义在下方
+#define MS_SUBST_ENTRY_RVA  0x10AA20u   // SubstituteKeys 本体（mov eax,fs:[0] 头 6B）
+#define SUBST_ENTRY_HDR_BYTES 6
+static BYTE  g_origSubstEntry[SUBST_ENTRY_HDR_BYTES];
+static BYTE* g_substEntryTramp = NULL;
+static BOOL  g_hookedSubstEntry = FALSE;
+
+// 预展开 SubstituteKeys 输入文本（textPtr = UTF-16 §L 文本缓冲）
+static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr)
+{
+    static volatile LONG s_cnt = 0;
+    __try
+    {
+        if (textPtr < 0x10000 || textPtr > 0x7FFEFFFF) return;
+        WORD* w = (WORD*)textPtr;
+        int n = 0, hasSL = 0, i;
+        // 求长度 + 检测 §L（A7 00 4C 00）
+        while (n < 252 && w[n])
+        {
+            if (!hasSL && n + 1 < 252 && w[n] == 0x00A7 && w[n + 1] == 0x004C) hasSL = 1;
+            n++;
+        }
+        if (!hasSL || n < 4) return;
+        WORD ebuf[260];
+        int en = tfstr_expand_keys(w, n, ebuf, 256);
+        if (en <= 0 || en >= n) return;          // 只缩短才改写（绝不扩展越界）
+        DWORD old;
+        if (VirtualProtect((void*)textPtr, (n + 1) * 2, PAGE_READWRITE, &old))
+        {
+            for (i = 0; i < en; i++) w[i] = ebuf[i];
+            w[en] = 0;
+            VirtualProtect((void*)textPtr, (n + 1) * 2, old, &old);
+            LONG c = InterlockedIncrement(&s_cnt);
+            if (c <= 20)
+                log_msg("[CJK] v23q SubstituteKeys 预展开：%d WORD -> %d WORD @ %08X\n",
+                        n, en, textPtr);
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { }
+}
+
+static void __declspec(naked) cjk_subst_entry_impl(void)
+{
+    __asm
+    {
+        ; 进入：[esp]=ret, [esp+0x10]=输入文本指针（hook 替换头 6B）
+        ; pushad 后：文本指针 = [esp+0x20+0x10] = [esp+0x30]
+        pushad
+        mov  eax, [esp + 0x30]
+        test eax, eax
+        jz   se_done
+        push eax
+        call cjk_subst_expand_input
+        add  esp, 4
+    se_done:
+        popad
+        jmp  dword ptr [g_substEntryTramp]   ; trampoline：原 6B + jmp 原函数+6
+    }
+}
+
+static int install_subst_entry_hook(void)
+{
+    BYTE* entry;
+    DWORD oldProt;
+    HMODULE hMs;
+    static const BYTE expect[SUBST_ENTRY_HDR_BYTES] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00};
+    if (g_hookedSubstEntry) return 1;
+    hMs = GetModuleHandleA("MSystem.dll");
+    if (!hMs) return 0;
+    g_msBase = (DWORD)hMs;
+    entry = (BYTE*)(g_msBase + MS_SUBST_ENTRY_RVA);
+    if (memcmp(entry, expect, SUBST_ENTRY_HDR_BYTES) != 0)
+    {
+        log_msg("[CJK] v23q SubstituteKeys 入口核验失败：%02X %02X %02X %02X %02X %02X，跳过\n",
+                entry[0], entry[1], entry[2], entry[3], entry[4], entry[5]);
+        return 0;
+    }
+    memcpy(g_origSubstEntry, entry, SUBST_ENTRY_HDR_BYTES);
+    // trampoline：VirtualAlloc 可执行（★ 铁律：不能 BYTE[16] 数组）
+    g_substEntryTramp = (BYTE*)VirtualAlloc(NULL, 32, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    if (!g_substEntryTramp) return 0;
+    memcpy(g_substEntryTramp, entry, SUBST_ENTRY_HDR_BYTES);
+    g_substEntryTramp[6] = 0xE9;
+    *(DWORD*)(g_substEntryTramp + 7) = ((DWORD)entry + SUBST_ENTRY_HDR_BYTES) -
+                                       ((DWORD)g_substEntryTramp + 11);
+    if (!VirtualProtect(entry, SUBST_ENTRY_HDR_BYTES, PAGE_EXECUTE_READWRITE, &oldProt)) return 0;
+    entry[0] = 0xE9;
+    *(DWORD*)(entry + 1) = (DWORD)cjk_subst_entry_impl - ((DWORD)entry + 5);
+    VirtualProtect(entry, SUBST_ENTRY_HDR_BYTES, oldProt, &oldProt);
+    FlushInstructionCache(GetCurrentProcess(), entry, SUBST_ENTRY_HDR_BYTES);
+    g_hookedSubstEntry = TRUE;
+    log_msg("[CJK] v23q SubstituteKeys 本体 hook：%08X -> %08X（入口 §L 预展开，6B trampoline）\n",
+            (DWORD)entry, (DWORD)cjk_subst_entry_impl);
+    return 1;
+}
 static DWORD g_substBackVA = 0;         // 运行时 = g_msBase + MS_SUBST_BACK_RVA
 static DWORD g_substRetVA  = 0;         // 运行时 = g_msBase + MS_SUBST_RET_RVA
 static DWORD g_convOrigVA  = 0;         // 运行时 = g_msBase + MS_CONV_BODY_RVA（0x44EA 入口）
@@ -4178,6 +4293,10 @@ static BOOL install_hook(void)
             //   0x44EA 有 10 个调用点，本体 hook 拦截全部，其他场景特殊数据被全角化
             //   破坏 → 崩溃风险。仅保留 0x10ABEA 调用点 handler（影响面最小）。
             install_subst_hook();
+            // ★ v23q：hook SubstituteKeys 本体入口——§L 预展开（竞态根治）。
+            //   教程/菜单/字幕所有 §L 文本必经 SubstituteKeys（0x10AA20）；
+            //   入口原子预展开 → 引擎无 §L 可展 → 键名随机缺失/句尾 @ 消失。
+            install_subst_entry_hook();
             // ★ v16t：hook CImage::Write 本体（文本绘制出口，前置全角化 → 覆盖教程/字幕/UI）
             install_draw_hook();
 
