@@ -116,7 +116,7 @@
 //     —— 全部导致乱码或崩溃。
 //     ★ 以及「把正文转成 GBK 喂给渲染器」（v16e）—— 整句不出字。
 // ============================================================================
-#define CJK_VERSION "v23q4"
+#define CJK_VERSION "v23q5"
 
 #include "pch.h"
 
@@ -2943,10 +2943,10 @@ static void __declspec(noinline) cjk_subst_expand_input(DWORD textPtr)
                 (c >= 0xFF00 && c <= 0xFFEF)) hasCjk = 1;
             n++;
         }
-        // ★ v23q.4 诊断（轻量化）：只记录【含 §L 的】输入（前 100 条）——
-        //   v23q3 每次调用都 IO（50 次）拖慢渲染 → 竞态加重（用户反馈 @ 加重）。
-        //   无 §L 的普通文本零 IO 快速返回。教程提示若走 SubstituteKeys 必含 §L + CJK。
-        if (hasSL)
+        // ★ v23q.5 诊断（轻量化）：只记录【含 §L + CJK 的】输入（前 100 条）——
+        //   加载画面 §LSTD_LOADING（CJK=0）不记录，防刷屏占满配额；
+        //   教程提示（含 §L + 中文正文）若走 SubstituteKeys 必记录 + 预展开触发。
+        if (hasSL && hasCjk)
         {
             LONG p = InterlockedIncrement(&s_probe);
             if (p <= 100)
@@ -3052,16 +3052,23 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         ; 进入：esp→src, esp+4→0x01(源宽标志), esp+8→len(v14); ecx=目标, edx=1
         ; 键名判别：解引用源指针读首字节 0x27（' 窄键名）或首 word 0x0027（宽键名）
         ; ★v18f：v18e 误写 byte ptr [esp]（读栈上源指针低字节，键名检测完全失效 + 随机误判）
+        ; ★v23q5：首字节 0x27 不能直接判键名——汉字"大"(U+5927, LE 27 59)低字节恰为 0x27，
+        ;   过场对白"大恶魔瓦塔尔正是这觊觎者之一，"以"大"开头 → 误判键名 → 逐字节全角化 → 整句乱码！
+        ;   窄键名特征：'X'（27 字母 27）或 'XXX'（27 字母..27）或 'X 无右引号（27 字母 0）
+        ;   ⇒ 第 3 字节 == 0x27 或 0x00 → 键名；否则（汉字，第 3 字节 = 下字符低字节）→ 宽文本分支
         mov  eax, [esp]                 ; eax = 源指针
         cmp  byte ptr [eax], 0x27
-        je   subst_key
+        jne  ck_wide_word
+        cmp  byte ptr [eax + 1], 0
+        je   subst_key                  ; 27 00 = 宽引号开头 → 键名（宽）
+        cmp  byte ptr [eax + 2], 0x27
+        je   subst_key                  ; 'X' → 键名
+        cmp  byte ptr [eax + 2], 0
+        je   subst_key                  ; 'X 无右引号（0 结束）→ 键名
+        jmp  not_key                    ; 汉字（如"大" 27 59 76…）→ 宽文本分支
+    ck_wide_word:
         cmp  word ptr [eax], 0x0027
-        je   subst_key
-        ; ── 非键名（宽文本值）：模拟原 call 0x44EA ──
-        ;   push 返回地址(0x10ABEF) → jmp 0x44EA 原入口（v18f 禁用 0x44EA 本体 hook，
-        ;   直接走原逻辑；宽文本完全不受影响）
-        push  dword ptr [g_substRetVA]
-        jmp   dword ptr [g_convOrigVA]
+        jne  not_key
     subst_key:
         ; ── 键名：全角化写入，写满 len 槽 ──
         pushad
@@ -3126,6 +3133,12 @@ static void __declspec(naked) cjk_subst_key_impl(void)
         add  esp, 0x0C                  ; 清 3 参数（src/0x01/len）
         xor  eax, eax                   ; ax=0 → 0x10ABF9 test ax,ax 命中 jz → 内层退出
         jmp  dword ptr [g_substBackVA]
+    not_key:
+        ; ── 非键名（宽文本值）：模拟原 call 0x44EA ──
+        ;   push 返回地址(0x10ABEF) → jmp 0x44EA 原入口（v18f 禁用 0x44EA 本体 hook，
+        ;   直接走原逻辑；宽文本完全不受影响）
+        push  dword ptr [g_substRetVA]
+        jmp   dword ptr [g_convOrigVA]
     }
 }
 
